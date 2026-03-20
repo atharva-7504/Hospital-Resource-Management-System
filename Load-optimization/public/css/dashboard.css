@@ -1,0 +1,74 @@
+body {
+    background-color: #0a0a0b;
+    color: #e4e4e7;
+    background-image:
+        radial-gradient(circle at 15% 50%, rgba(234, 179, 8, 0.04) 0%, transparent 50%),
+        radial-gradient(circle at 85% 30%, rgba(255, 255, 255, 0.02) 0%, transparent 50%);
+    min-height: 100vh;
+}
+
+.glass-panel {
+    background: rgba(24, 24, 27, 0.6);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
+}
+
+.glass-glow {
+    box-shadow: 0 0 20px rgba(234, 179, 8, 0.25);
+    border-color: rgba(234, 179, 8, 0.3);
+}
+
+::-webkit-scrollbar {
+    height: 6px;
+    width: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: #121214;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #3f3f46;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #eab308;
+}
+
+.loader {
+    border: 3px solid rgba(255, 255, 255, 0.1);
+    border-bottom-color: #eab308;
+    border-radius: 50%;
+    display: inline-block;
+    box-sizing: border-box;
+    animation: rotation 1s linear infinite;
+}
+
+.animate-fade-in {
+    animation: fadeIn 0.5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+@keyframes rotation {
+    0% {
+        transform: rotate(0deg);
+    }
+
+    100% {
+        transform: rotate(360deg);
+    }
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}

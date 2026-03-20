@@ -1,0 +1,69 @@
+<% layout("layouts/boilerplate") %>
+
+<div class="py-5">
+  <div class="card">
+    <div class="card-body p-4 p-md-5">
+      <div class="row align-items-center g-4">
+        <div class="col-lg-8">
+          <h1 class="display-6 fw-bold mb-3">CortexConnect</h1>
+          <p class="lead text-muted mb-4">
+            Simple appointment booking and review for patients, doctors, and admins.
+          </p>
+
+          <% if (message) { %>
+            <div class="alert alert-info"><%= message %></div>
+          <% } %>
+
+          <div class="d-flex flex-wrap gap-2">
+            <% if (profile) { %>
+              <a href="/profile" class="btn btn-primary">Open Profile</a>
+              <% if (profile.role === "admin" || profile.role === "doctor") { %>
+                <a href="/dashboard" class="btn btn-outline-primary">Dashboard</a>
+                <a href="/check-appointments" class="btn btn-outline-secondary">Check Appointments</a>
+              <% } else { %>
+                <a href="/appointment" class="btn btn-outline-primary">Book Appointment</a>
+                <a href="/check-status" class="btn btn-outline-secondary">Check Status</a>
+              <% } %>
+            <% } else { %>
+              <a href="/login" class="btn btn-primary">Login</a>
+              <a href="/signup" class="btn btn-outline-primary">Signup</a>
+            <% } %>
+          </div>
+
+          <% if (profile && profile.role === "doctor" && doctorProfile) { %>
+            <div class="border rounded-3 p-3 mt-4 bg-white">
+              <div class="text-uppercase text-muted small mb-2">Doctor Profile</div>
+              <div class="row g-3">
+                <div class="col-md-6">
+                  <div class="text-muted small">Specialization</div>
+                  <div class="fw-semibold"><%= doctorProfile.specialization === "general_physician" ? "General Physician" : doctorProfile.specialization === "orthopedic" ? "Orthopedic" : "Cardiology" %></div>
+                </div>
+                <div class="col-md-6">
+                  <div class="text-muted small">Department</div>
+                  <div class="fw-semibold"><%= doctorProfile.department || "-" %></div>
+                </div>
+                <div class="col-md-6">
+                  <div class="text-muted small">Hospital Hours</div>
+                  <div class="fw-semibold"><%= doctorProfile.hospital_start_time || "-" %> to <%= doctorProfile.hospital_end_time || "-" %></div>
+                </div>
+                <div class="col-md-6">
+                  <div class="text-muted small">Availability Days</div>
+                  <div class="fw-semibold"><%= (doctorProfile.availability_days || []).join(", ") || "-" %></div>
+                </div>
+              </div>
+            </div>
+          <% } %>
+        </div>
+
+        <div class="col-lg-4">
+          <div class="border rounded-3 p-4 bg-light">
+            <div class="text-uppercase text-muted small mb-2">Welcome</div>
+            <p class="mb-0 text-muted">
+              Use the profile menu on the right to view your account details and role-based pages.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,212 @@
+<% layout("layouts/boilerplate") %>
+
+<div class="appointment-progress">
+  <div class="appointment-progress__ring" data-progress-ring>
+    <span class="appointment-progress__value" data-progress-value>0%</span>
+  </div>
+</div>
+
+<div class="py-4 py-lg-5">
+  <div class="mb-4">
+    <h1 class="h3 fw-bold mb-2">Book Appointment</h1>
+    <p class="text-muted mb-0">Pick a specialist, check the doctor availability, and confirm your booking.</p>
+  </div>
+
+  <% if (message) { %>
+    <div class="alert alert-warning"><%= message %></div>
+  <% } %>
+
+  <div class="row g-4">
+    <div class="col-lg-8">
+      <form action="/appointment" method="POST" class="needs-validation" novalidate data-appointment-form>
+        <input type="hidden" name="user_id" value="<%= formData.user_id || '' %>">
+        <input type="hidden" name="doctor_id" value="<%= formData.doctor_id || '' %>">
+        <input type="hidden" name="doctor_name" value="<%= formData.doctor_name || '' %>">
+
+        <div class="card mb-4">
+          <div class="card-body p-4">
+            <h2 class="h5 mb-3">Basic Patient Details</h2>
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label class="form-label">Full Name</label>
+                <input type="text" name="full_name" class="form-control" value="<%= formData.full_name || '' %>" readonly>
+                <div class="form-text">Auto-filled from your signed-in profile.</div>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Age</label>
+                <input type="number" name="age" class="form-control" min="0" max="120" value="<%= formData.age || '' %>" data-progress-group="age_dob">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Date of Birth</label>
+                <input type="date" name="date_of_birth" class="form-control" value="<%= formData.date_of_birth || '' %>" data-progress-group="age_dob">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Gender</label>
+                <select name="gender" class="form-select" required>
+                  <% genderOptions.forEach((option) => { %>
+                    <option value="<%= option.value %>" <%= (formData.gender || '') === option.value ? 'selected' : '' %>><%= option.label %></option>
+                  <% }) %>
+                </select>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Phone Number</label>
+                <input type="tel" name="phone" class="form-control" value="<%= formData.phone || '' %>" required placeholder="10-digit mobile number" pattern="[0-9]{10}">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Email ID</label>
+                <input type="email" name="email" class="form-control" value="<%= formData.email || '' %>" readonly>
+                <div class="form-text">Auto-filled from your signed-in profile.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card mb-4">
+          <div class="card-body p-4">
+            <h2 class="h5 mb-3">Patient & Doctor Selection</h2>
+            <div class="row g-3">
+              <div class="col-md-4">
+                <label class="form-label">Patient Type</label>
+                <select name="patient_type" class="form-select" required>
+                  <% patientTypeOptions.forEach((option) => { %>
+                    <option value="<%= option.value %>" <%= (formData.patient_type || 'existing') === option.value ? 'selected' : '' %>><%= option.label %></option>
+                  <% }) %>
+                </select>
+                <div class="form-text">Existing patients can reuse previous details.</div>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Patient ID</label>
+                <input type="text" class="form-control" value="<%= formData.user_id || '' %>" readonly>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Specialization</label>
+                <select name="specialization" class="form-select" required>
+                  <option value="">Choose...</option>
+                  <% specializationOptions.forEach((option) => { %>
+                    <option value="<%= option.value %>" <%= (formData.specialization || '') === option.value ? 'selected' : '' %>><%= option.label %></option>
+                  <% }) %>
+                </select>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Appointment Date</label>
+                <input type="date" name="appointment_date" class="form-control" value="<%= formData.appointment_date || '' %>" required>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Doctor Selected</label>
+                <input type="text" class="form-control" value="<%= formData.doctor_name || '' %>" readonly placeholder="Select from doctor page">
+              </div>
+              <div class="col-md-4 d-flex align-items-end">
+                <button type="button" class="btn btn-outline-primary w-100" data-browse-doctors>Browse Doctors</button>
+              </div>
+            </div>
+
+            <% if (selectedDoctor) { %>
+              <div class="alert alert-light border mt-4 mb-0">
+                <div class="d-flex flex-wrap justify-content-between align-items-center gap-3">
+                  <div>
+                    <h3 class="h6 mb-1"><%= selectedDoctor.name %></h3>
+                    <div class="text-muted small"><%= specializationOptions.find((item) => item.value === selectedDoctor.specialization)?.label || selectedDoctor.specialization %></div>
+                  </div>
+                  <span class="badge text-bg-<%= availableSlots.length ? 'success' : 'secondary' %>">
+                    <%= availableSlots.length ? 'Available' : 'No slots available' %>
+                  </span>
+                </div>
+                <div class="mt-3 small text-muted">
+                  Availability days: <%= (selectedDoctor.availability_days || []).join(", ") %>
+                </div>
+              </div>
+            <% } %>
+
+            <div class="mt-4">
+              <label class="form-label">Available Time Slots</label>
+              <select name="time_slot" class="form-select" <%= selectedDoctor ? '' : 'disabled' %> required>
+                <option value=""><%= selectedDoctor ? 'Choose a time slot' : 'Select a doctor first' %></option>
+                <% (availableSlots || []).forEach((slot) => { %>
+                  <option value="<%= slot %>" <%= (formData.time_slot || '') === slot ? 'selected' : '' %>><%= slot %></option>
+                <% }) %>
+              </select>
+              <div class="form-text">The page only shows slots that are still free for the selected doctor and date.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card mb-4">
+          <div class="card-body p-4">
+            <h2 class="h5 mb-3">Medical Details</h2>
+            <div class="row g-3">
+              <div class="col-12">
+                <label class="form-label">Symptoms / Problem Description</label>
+                <textarea name="symptoms" class="form-control" rows="4" required><%= formData.symptoms || '' %></textarea>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Department</label>
+                <input type="text" name="department" class="form-control" value="<%= formData.department || '' %>" placeholder="Optional, auto-detected if blank">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Previous Visit?</label>
+                <select name="previous_visit" class="form-select" required>
+                  <option value="false" <%= String(formData.previous_visit) !== 'true' ? 'selected' : '' %>>No</option>
+                  <option value="true" <%= String(formData.previous_visit) === 'true' ? 'selected' : '' %>>Yes</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card mb-4">
+          <div class="card-body p-4">
+            <h2 class="h5 mb-3">Urgency and Confirmation</h2>
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label class="form-label">Urgency Level</label>
+                <select name="urgency_level" class="form-select" required>
+                  <option value="">Choose...</option>
+                  <% urgencyOptions.forEach((option) => { %>
+                    <option value="<%= option.value %>" <%= (formData.urgency_level || 'low') === option.value ? 'selected' : '' %>><%= option.label %></option>
+                  <% }) %>
+                </select>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Preferred Contact Method</label>
+                <select name="preferred_contact_method" class="form-select" required>
+                  <% contactMethodOptions.forEach((option) => { %>
+                    <option value="<%= option.value %>" <%= (formData.preferred_contact_method || 'phone') === option.value ? 'selected' : '' %>><%= option.label %></option>
+                  <% }) %>
+                </select>
+              </div>
+              <div class="col-12">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" name="consent" id="appointmentConsent" <%= formData.consent ? 'checked' : '' %> required>
+                  <label class="form-check-label" for="appointmentConsent">
+                    I confirm the details are correct.
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="d-flex flex-wrap gap-2">
+          <button type="submit" class="btn btn-primary btn-lg">Submit Appointment</button>
+          <a href="/check-status" class="btn btn-outline-secondary btn-lg">Check Status</a>
+        </div>
+      </form>
+    </div>
+
+    <div class="col-lg-4">
+      <div class="card position-sticky" style="top: 1rem;">
+        <div class="card-body p-4">
+          <h2 class="h6 text-uppercase text-muted mb-3">Quick Summary</h2>
+          <ul class="list-unstyled mb-0 small text-muted">
+            <li class="mb-2">Name and email are auto-filled from the signed-in patient profile.</li>
+            <li class="mb-2">Doctor selection is filtered by specialization and date.</li>
+            <li class="mb-2">Time slots are blocked automatically after booking.</li>
+            <li class="mb-0">The progress badge stays visible while you fill the form.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/js/appointment.js"></script>

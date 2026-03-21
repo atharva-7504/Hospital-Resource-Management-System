@@ -1,0 +1,36 @@
+<% layout("layouts/boilerplate") %>
+
+<div class="py-5">
+  <div class="row justify-content-center">
+    <div class="col-lg-7">
+      <div class="card">
+        <div class="card-body p-5">
+          <h1 class="h3 fw-bold mb-2">Login</h1>
+          <p class="text-muted mb-4">Use your username and password to sign in.</p>
+
+          <% if (message) { %>
+            <div class="alert alert-info"><%= message %></div>
+          <% } %>
+
+          <form action="/login" method="POST">
+            <div class="mb-3">
+              <label class="form-label">Username</label>
+              <input type="text" name="username" class="form-control" value="<%= formData.username || '' %>" required>
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label">Password</label>
+              <input type="password" name="password" class="form-control" required>
+            </div>
+
+            <button type="submit" class="btn btn-primary w-100">Submit Login</button>
+
+            <div class="text-center text-muted my-3">or</div>
+
+            <a href="/auth/google" class="btn btn-outline-danger w-100">Continue with Google</a>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

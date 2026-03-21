@@ -1,0 +1,321 @@
+<% layout("layouts/boilerplate") %>
+
+<div class="py-4 py-lg-5">
+  <div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4">
+    <div>
+      <h1 class="h3 fw-bold mb-2">Dashboard</h1>
+      <p class="text-muted mb-0">Staff overview for CortexConnect.</p>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+      <a href="/check-appointments" class="btn btn-outline-primary btn-sm">Appointments</a>
+      <% if (profile && profile.role === "admin") { %>
+        <a href="/bed-admissions" class="btn btn-outline-primary btn-sm">Bed Admissions</a>
+        <a href="/staff-records" class="btn btn-outline-primary btn-sm">Staff Records</a>
+      <% } %>
+    </div>
+  </div>
+
+  <div class="row g-3 mb-4">
+    <div class="col-md-3">
+      <div class="card h-100">
+        <div class="card-body">
+          <div class="text-muted small">Users</div>
+          <div class="h3 mb-0"><%= userCount %></div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card h-100">
+        <div class="card-body">
+          <div class="text-muted small">Pending Appointments</div>
+          <div class="h3 mb-0"><%= pendingCount %></div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card h-100">
+        <div class="card-body">
+          <div class="text-muted small">Accepted</div>
+          <div class="h3 mb-0"><%= acceptedCount %></div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card h-100">
+        <div class="card-body">
+          <div class="text-muted small">Rejected</div>
+          <div class="h3 mb-0"><%= rejectedCount %></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-4 mb-4">
+    <div class="col-lg-6">
+      <div class="card h-100">
+        <div class="card-body p-4">
+          <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+            <h2 class="h5 mb-0">Bed Snapshot</h2>
+            <span class="badge text-bg-light border">3-day projection</span>
+          </div>
+
+          <% if (bedSummary) { %>
+            <div class="alert alert-<%= bedSummary.occupancyPct >= 90 || bedSummary.freeBeds <= 5 ? 'danger' : bedSummary.occupancyPct >= 80 ? 'warning' : 'success' %>">
+              <% if (bedSummary.occupancyPct >= 90 || bedSummary.freeBeds <= 5) { %>
+                Limited beds available. Keep the ward moving and prepare extra capacity.
+              <% } else if (bedSummary.occupancyPct >= 80) { %>
+                Bed usage is rising. Keep an eye on critical and ICU availability.
+              <% } else { %>
+                Bed capacity is currently under control.
+              <% } %>
+            </div>
+            <div class="mb-3">
+              <div class="d-flex justify-content-between small text-muted mb-1">
+                <span>Occupancy</span>
+                <span><%= bedSummary.occupancyPct %>%</span>
+              </div>
+              <div class="progress" style="height: 12px;">
+                <div
+                  class="progress-bar <%= bedSummary.occupancyPct >= 90 ? 'bg-danger' : bedSummary.occupancyPct >= 80 ? 'bg-warning' : 'bg-success' %>"
+                  style="width: <%= Math.min(bedSummary.occupancyPct, 100) %>%"
+                ></div>
+              </div>
+            </div>
+            <div class="row g-3">
+              <div class="col-6 col-xl-3">
+                <div class="border rounded-3 p-3 h-100">
+                  <div class="text-muted small">Total</div>
+                  <div class="h4 mb-0"><%= bedSummary.totalBeds %></div>
+                </div>
+              </div>
+              <div class="col-6 col-xl-3">
+                <div class="border rounded-3 p-3 h-100">
+                  <div class="text-muted small">Occupied</div>
+                  <div class="h4 mb-0"><%= bedSummary.occupiedBeds %></div>
+                </div>
+              </div>
+              <div class="col-6 col-xl-3">
+                <div class="border rounded-3 p-3 h-100">
+                  <div class="text-muted small">Free</div>
+                  <div class="h4 mb-0"><%= bedSummary.freeBeds %></div>
+                </div>
+              </div>
+              <div class="col-6 col-xl-3">
+                <div class="border rounded-3 p-3 h-100">
+                  <div class="text-muted small">Projected</div>
+                  <div class="h4 mb-0"><%= bedProjection ? bedProjection.projected : bedSummary.occupiedBeds %></div>
+                </div>
+              </div>
+            </div>
+
+            <hr class="my-4">
+
+            <div class="row g-3">
+              <div class="col-md-4">
+                <div class="border rounded-3 p-3">
+                  <div class="text-muted small">Normal Demand</div>
+                  <div class="h4 mb-0"><%= bedSummary.normalBeds %></div>
+                </div>
+              </div>
+              <div class="col-md-4">
+                <div class="border rounded-3 p-3">
+                  <div class="text-muted small">Critical Demand</div>
+                  <div class="h4 mb-0"><%= bedSummary.criticalBeds %></div>
+                </div>
+              </div>
+              <div class="col-md-4">
+                <div class="border rounded-3 p-3">
+                  <div class="text-muted small">ICU Demand</div>
+                  <div class="h4 mb-0"><%= bedSummary.icuBeds %></div>
+                </div>
+              </div>
+            </div>
+          <% } else { %>
+            <div class="alert alert-info mb-0">No bed admissions recorded yet.</div>
+          <% } %>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-6">
+      <div class="card h-100">
+        <div class="card-body p-4">
+          <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+            <h2 class="h5 mb-0">Staff Coverage</h2>
+            <span class="badge text-bg-light border">3-day projection</span>
+          </div>
+
+          <% if (staffSummary) { %>
+            <div class="alert alert-<%= staffSummary.coveragePct < 85 ? 'danger' : staffSummary.coveragePct < 100 ? 'warning' : 'success' %>">
+              <% if (staffSummary.coveragePct < 85) { %>
+                Staff coverage is below target. Consider adding or shifting staff soon.
+              <% } else if (staffSummary.coveragePct < 100) { %>
+                Staff coverage is close to the required level.
+              <% } else { %>
+                Staff coverage is within target.
+              <% } %>
+            </div>
+            <div class="mb-3">
+              <div class="d-flex justify-content-between small text-muted mb-1">
+                <span>Coverage</span>
+                <span><%= staffSummary.coveragePct %>%</span>
+              </div>
+              <div class="progress" style="height: 12px;">
+                <div
+                  class="progress-bar <%= staffSummary.coveragePct < 85 ? 'bg-danger' : staffSummary.coveragePct < 100 ? 'bg-warning' : 'bg-success' %>"
+                  style="width: <%= Math.min(staffSummary.coveragePct, 100) %>%"
+                ></div>
+              </div>
+            </div>
+            <div class="row g-3">
+              <div class="col-6 col-xl-3">
+                <div class="border rounded-3 p-3 h-100">
+                  <div class="text-muted small">Total</div>
+                  <div class="h4 mb-0"><%= staffSummary.totalStaff %></div>
+                </div>
+              </div>
+              <div class="col-6 col-xl-3">
+                <div class="border rounded-3 p-3 h-100">
+                  <div class="text-muted small">Active</div>
+                  <div class="h4 mb-0"><%= staffSummary.activeStaff %></div>
+                </div>
+              </div>
+              <div class="col-6 col-xl-3">
+                <div class="border rounded-3 p-3 h-100">
+                  <div class="text-muted small">Required</div>
+                  <div class="h4 mb-0"><%= staffSummary.requiredStaff %></div>
+                </div>
+              </div>
+              <div class="col-6 col-xl-3">
+                <div class="border rounded-3 p-3 h-100">
+                  <div class="text-muted small">Projected</div>
+                  <div class="h4 mb-0"><%= staffProjection ? staffProjection.projected : staffSummary.activeStaff %></div>
+                </div>
+              </div>
+            </div>
+          <% } else { %>
+            <div class="alert alert-info mb-0">No staff records saved yet.</div>
+          <% } %>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-4 mb-4">
+    <div class="col-lg-6">
+      <div class="card h-100">
+        <div class="card-body p-4">
+          <div class="d-flex justify-content-between align-items-center gap-2 mb-3">
+            <h2 class="h5 mb-0">Recent Bed Records</h2>
+            <a href="/bed-admissions" class="btn btn-outline-primary btn-sm">Open</a>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+              <thead class="table-light">
+                <tr>
+                  <th>Patient</th>
+                  <th>Category</th>
+                  <th>Snapshot</th>
+                  <th>Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% if (!bedRecords || bedRecords.length === 0) { %>
+                  <tr><td colspan="4" class="text-center py-4 text-muted">No bed records yet.</td></tr>
+                <% } else { %>
+                  <% bedRecords.forEach((record) => { %>
+                    <tr>
+                      <td><%= record.patient_name %></td>
+                      <td><%= record.bed_category %></td>
+                      <td><%= record.occupied_beds %>/<%= record.total_beds %></td>
+                      <td><%= record.admission_date %></td>
+                    </tr>
+                  <% }) %>
+                <% } %>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-6">
+      <div class="card h-100">
+        <div class="card-body p-4">
+          <div class="d-flex justify-content-between align-items-center gap-2 mb-3">
+            <h2 class="h5 mb-0">Recent Staff Records</h2>
+            <a href="/staff-records" class="btn btn-outline-primary btn-sm">Open</a>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+              <thead class="table-light">
+                <tr>
+                  <th>Staff</th>
+                  <th>Role</th>
+                  <th>Coverage</th>
+                  <th>Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% if (!staffRecords || staffRecords.length === 0) { %>
+                  <tr><td colspan="4" class="text-center py-4 text-muted">No staff records yet.</td></tr>
+                <% } else { %>
+                  <% staffRecords.forEach((record) => { %>
+                    <tr>
+                      <td><%= record.staff_name %></td>
+                      <td><%= record.staff_role %></td>
+                      <td><%= record.active_staff %>/<%= record.required_staff %></td>
+                      <td><%= record.effective_date %></td>
+                    </tr>
+                  <% }) %>
+                <% } %>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-body">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2 class="h5 mb-0">Latest Appointments</h2>
+        <a href="/check-appointments" class="btn btn-outline-primary btn-sm">Open Appointment Queue</a>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+              <th>Patient</th>
+              <th>Doctor</th>
+              <th>Date</th>
+              <th>Time</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% if (!records || records.length === 0) { %>
+              <tr>
+                <td colspan="5" class="text-center py-4 text-muted">No appointments yet.</td>
+              </tr>
+            <% } else { %>
+              <% records.forEach((record) => { %>
+                <tr>
+                  <td>
+                    <div class="fw-semibold"><%= record.full_name %></div>
+                    <div class="text-muted small"><%= record.email %></div>
+                  </td>
+                  <td><%= record.doctor_name %></td>
+                  <td><%= record.appointment_date %></td>
+                  <td><%= record.time_slot %></td>
+                  <td><span class="badge text-bg-<%= record.status === 'Accepted' ? 'success' : record.status === 'Rejected' ? 'danger' : 'warning' %> text-uppercase"><%= record.status %></span></td>
+                </tr>
+              <% }) %>
+            <% } %>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>

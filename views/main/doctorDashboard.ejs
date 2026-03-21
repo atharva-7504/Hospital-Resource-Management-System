@@ -1,0 +1,122 @@
+<% layout("layouts/boilerplate") %>
+
+<div class="py-4 py-lg-5">
+  <div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4">
+    <div>
+      <h1 class="h3 fw-bold mb-2">Doctor Dashboard</h1>
+      <p class="text-muted mb-0">Your schedule and accepted patients in one place.</p>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+      <a href="/check-appointments" class="btn btn-outline-primary btn-sm">Accepted Patients</a>
+      <a href="/profile" class="btn btn-outline-secondary btn-sm">Profile</a>
+    </div>
+  </div>
+
+  <div class="row g-3 mb-4">
+    <div class="col-md-3">
+      <div class="card h-100">
+        <div class="card-body">
+          <div class="text-muted small">Accepted Patients</div>
+          <div class="h3 mb-0"><%= acceptedCount || 0 %></div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card h-100">
+        <div class="card-body">
+          <div class="text-muted small">Specialization</div>
+          <div class="h3 mb-0"><%= doctorProfile ? doctorProfile.specialization : "-" %></div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card h-100">
+        <div class="card-body">
+          <div class="text-muted small">Department</div>
+          <div class="h3 mb-0"><%= doctorProfile ? doctorProfile.department || "-" : "-" %></div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card h-100">
+        <div class="card-body">
+          <div class="text-muted small">Hospital Hours</div>
+          <div class="h3 mb-0">
+            <%= doctorProfile ? (doctorProfile.hospital_start_time || "-") + " to " + (doctorProfile.hospital_end_time || "-") : "-" %>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-4 mb-4">
+    <div class="col-lg-5">
+      <div class="card h-100">
+        <div class="card-body p-4">
+          <h2 class="h5 mb-3">Doctor Profile</h2>
+          <% if (doctorProfile) { %>
+            <dl class="row mb-0">
+              <dt class="col-5 text-muted fw-normal">Name</dt>
+              <dd class="col-7"><%= doctorProfile.name || profile.fullName || "-" %></dd>
+
+              <dt class="col-5 text-muted fw-normal">Specialization</dt>
+              <dd class="col-7"><%= doctorProfile.specialization === "general_physician" ? "General Physician" : doctorProfile.specialization === "orthopedic" ? "Orthopedic" : "Cardiology" %></dd>
+
+              <dt class="col-5 text-muted fw-normal">Department</dt>
+              <dd class="col-7"><%= doctorProfile.department || "-" %></dd>
+
+              <dt class="col-5 text-muted fw-normal">Hospital Time</dt>
+              <dd class="col-7"><%= doctorProfile.hospital_start_time || "-" %> to <%= doctorProfile.hospital_end_time || "-" %></dd>
+
+              <dt class="col-5 text-muted fw-normal">Days</dt>
+              <dd class="col-7"><%= (doctorProfile.availability_days || []).join(", ") || "-" %></dd>
+            </dl>
+          <% } else { %>
+            <div class="alert alert-warning mb-0">No doctor profile found for this account.</div>
+          <% } %>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-7">
+      <div class="card h-100">
+        <div class="card-body p-4">
+          <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+            <h2 class="h5 mb-0">Accepted Patients</h2>
+            <span class="badge text-bg-light border"><%= acceptedAppointments ? acceptedAppointments.length : 0 %> records</span>
+          </div>
+
+          <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+              <thead class="table-light">
+                <tr>
+                  <th>Patient</th>
+                  <th>Email</th>
+                  <th>Date</th>
+                  <th>Time</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% if (!acceptedAppointments || acceptedAppointments.length === 0) { %>
+                  <tr>
+                    <td colspan="4" class="text-center py-4 text-muted">No accepted patients yet.</td>
+                  </tr>
+                <% } else { %>
+                  <% acceptedAppointments.forEach((record) => { %>
+                    <% const patientUser = record.user_id && record.user_id.first_name ? record.user_id : null; %>
+                    <tr>
+                      <td><%= patientUser ? patientUser.first_name + " " + patientUser.last_name : record.full_name || "-" %></td>
+                      <td><%= patientUser ? patientUser.email : record.email || "-" %></td>
+                      <td><%= record.appointment_date || "-" %></td>
+                      <td><%= record.time_slot || "-" %></td>
+                    </tr>
+                  <% }) %>
+                <% } %>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

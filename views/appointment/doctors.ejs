@@ -1,0 +1,80 @@
+<% layout("layouts/boilerplate") %>
+
+<div class="py-4 py-lg-5">
+  <div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4">
+    <div>
+      <h1 class="h3 fw-bold mb-2">Choose Doctor</h1>
+      <p class="text-muted mb-0">Pick a doctor based on specialization and availability.</p>
+    </div>
+    <a href="/appointment" class="btn btn-outline-primary">Back to Appointment</a>
+  </div>
+
+  <div class="card mb-4">
+    <div class="card-body p-4">
+      <form action="/doctors" method="GET" class="row g-3 align-items-end">
+        <div class="col-md-5">
+          <label class="form-label">Specialization</label>
+          <select name="specialization" class="form-select">
+            <option value="">All Specializations</option>
+            <% specializationOptions.forEach((option) => { %>
+              <option value="<%= option.value %>" <%= specialization === option.value ? 'selected' : '' %>><%= option.label %></option>
+            <% }) %>
+          </select>
+        </div>
+        <div class="col-md-5">
+          <label class="form-label">Appointment Date</label>
+          <input type="date" name="appointment_date" class="form-control" value="<%= appointmentDate || '' %>" required>
+        </div>
+        <div class="col-md-2">
+          <button type="submit" class="btn btn-primary w-100">Filter</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="row g-4">
+    <% if (!doctors || doctors.length === 0) { %>
+      <div class="col-12">
+        <div class="alert alert-light border mb-0">No doctors found for this selection.</div>
+      </div>
+    <% } else { %>
+      <% doctors.forEach((doctor) => { %>
+        <div class="col-md-6 col-lg-4">
+          <div class="card h-100">
+            <div class="card-body p-4">
+              <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
+                <div>
+                  <h2 class="h5 mb-1"><%= doctor.name %></h2>
+                  <div class="text-muted small"><%= specializationOptions.find((option) => option.value === doctor.specialization)?.label || doctor.specialization %></div>
+                  <div class="text-muted small"><%= doctor.department || "General Department" %></div>
+                </div>
+                <span class="badge text-bg-<%= doctor.isOpen ? 'success' : 'secondary' %>">
+                  <%= doctor.isOpen ? 'Available' : 'Unavailable' %>
+                </span>
+              </div>
+
+              <div class="small text-muted mb-3">
+                <div class="mb-1">Hospital hours: <%= doctor.hospital_start_time || "-" %> to <%= doctor.hospital_end_time || "-" %></div>
+                <div class="mb-1">Available days: <%= (doctor.availability_days || []).join(", ") || "Not set" %></div>
+                <div>Available slots: <%= doctor.availableSlots && doctor.availableSlots.length ? doctor.availableSlots.join(", ") : "No open slots for the selected date" %></div>
+              </div>
+
+              <% if (doctor.isOpen) { %>
+                <a
+                  href="/appointment?<%= queryString ? queryString + '&' : '' %>doctor_id=<%= doctor._id %>&doctor_name=<%= encodeURIComponent(doctor.name) %>&specialization=<%= doctor.specialization %>&appointment_date=<%= appointmentDate %>"
+                  class="btn btn-outline-primary w-100"
+                >
+                  Select Doctor
+                </a>
+              <% } else { %>
+                <button class="btn btn-outline-secondary w-100" type="button" disabled>
+                  Not Available
+                </button>
+              <% } %>
+            </div>
+          </div>
+        </div>
+      <% }) %>
+    <% } %>
+  </div>
+</div>

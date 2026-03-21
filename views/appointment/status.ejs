@@ -1,0 +1,157 @@
+<% layout("layouts/boilerplate") %>
+<% const mode = viewerMode || (adminMode ? "admin" : "patient"); %>
+
+<div class="py-5">
+  <div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4">
+    <div>
+      <h1 class="h3 fw-bold mb-2">
+        <%= mode === "admin" ? "Check Appointments" : mode === "doctor" ? "Accepted Patients" : "Check Status" %>
+      </h1>
+      <p class="text-muted mb-0">
+        <%= mode === "admin" ? "Review all patient bookings and manage approvals." : mode === "doctor" ? "See the patients accepted for your schedule." : "Review your submitted appointment requests." %>
+      </p>
+    </div>
+    <% if (mode === "admin") { %>
+      <a href="/dashboard" class="btn btn-outline-primary">Dashboard</a>
+    <% } else if (mode === "doctor") { %>
+      <a href="/dashboard" class="btn btn-outline-primary">Dashboard</a>
+    <% } else { %>
+      <a href="/appointment" class="btn btn-outline-primary">New Appointment</a>
+    <% } %>
+  </div>
+
+  <% if (mode === "doctor" && doctorProfile) { %>
+    <div class="alert alert-info border mb-4">
+      <div class="fw-semibold mb-1"><%= doctorProfile.name || "Doctor" %></div>
+      <div class="small">
+        <%= doctorProfile.specialization || "-" %> | <%= doctorProfile.department || "-" %> | <%= doctorProfile.hospital_start_time || "-" %> to <%= doctorProfile.hospital_end_time || "-" %>
+      </div>
+    </div>
+  <% } %>
+
+  <div class="card">
+    <div class="card-body">
+      <div class="table-responsive">
+        <table class="table table-striped table-hover align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+              <% if (mode === "doctor") { %>
+                <th>Patient</th>
+                <th>Contact</th>
+                <th>Symptoms</th>
+                <th>Date</th>
+                <th>Time</th>
+                <th>Status</th>
+              <% } else if (mode === "admin") { %>
+                <th>User ID</th>
+                <th>Patient</th>
+                <th>Doctor</th>
+                <th>Specialist</th>
+                <th>Date</th>
+                <th>Time</th>
+                <th>Urgency</th>
+                <th>Contact</th>
+                <th>Status</th>
+                <th>Actions</th>
+                <th>Submitted</th>
+              <% } else { %>
+                <th>Doctor</th>
+                <th>Specialist</th>
+                <th>Date</th>
+                <th>Time</th>
+                <th>Urgency</th>
+                <th>Status</th>
+                <th>Submitted</th>
+              <% } %>
+            </tr>
+          </thead>
+          <tbody>
+            <% if (!records || records.length === 0) { %>
+              <tr>
+                <td colspan="<%= mode === 'doctor' ? 6 : mode === 'admin' ? 11 : 7 %>" class="text-center py-4 text-muted">
+                  <%= mode === "doctor" ? "No accepted patients yet." : mode === "admin" ? "No appointment details submitted yet." : "No appointment requests submitted yet." %>
+                </td>
+              </tr>
+            <% } else { %>
+              <% records.forEach((record) => { %>
+                <% const patientUser = record.user_id && record.user_id.first_name ? record.user_id : null; %>
+                <% const doctorUser = record.doctor_id && record.doctor_id.name ? record.doctor_id : null; %>
+                <tr>
+                  <% if (mode === "doctor") { %>
+                    <td>
+                      <div class="fw-semibold"><%= patientUser ? patientUser.first_name + " " + patientUser.last_name : record.full_name || "-" %></div>
+                      <div class="text-muted small"><%= patientUser ? patientUser.email : record.email || "-" %></div>
+                    </td>
+                    <td><%= record.phone || "-" %></td>
+                    <td><%= record.symptoms || "-" %></td>
+                    <td><%= record.appointment_date || "-" %></td>
+                    <td><%= record.time_slot || "-" %></td>
+                    <td><span class="badge text-bg-<%= record.status === 'Accepted' ? 'success' : record.status === 'Rejected' ? 'danger' : 'warning' %> text-uppercase"><%= record.status %></span></td>
+                  <% } else if (mode === "admin") { %>
+                    <td><%= record.user_id && record.user_id._id ? String(record.user_id._id) : record.user_id ? String(record.user_id) : "-" %></td>
+                    <td>
+                      <div class="fw-semibold"><%= patientUser ? patientUser.first_name + " " + patientUser.last_name : record.full_name || "-" %></div>
+                      <div class="text-muted small"><%= patientUser ? patientUser.email : record.email || "-" %> | <%= record.phone || "-" %></div>
+                      <div class="text-muted small">Patient type: <%= record.patient_type === "new" ? "New" : "Existing" %></div>
+                    </td>
+                    <td><%= doctorUser ? doctorUser.name : record.doctor_name || "-" %></td>
+                    <td><%= record.specialization === "general_physician" ? "General Physician" : record.specialization === "orthopedic" ? "Orthopedic" : "Cardiology" %></td>
+                    <td>
+                      <div><%= record.appointment_date || "-" %></div>
+                      <div class="text-muted small"><%= record.previous_visit ? "Previous visit" : "First visit" %></div>
+                    </td>
+                    <td><%= record.time_slot || "-" %></td>
+                    <td>
+                      <span class="badge text-bg-<%= record.urgency_level === 'high' ? 'danger' : record.urgency_level === 'medium' ? 'warning' : 'success' %>">
+                        <%= record.urgency_level %>
+                      </span>
+                    </td>
+                    <td><%= record.preferred_contact_method === "phone" ? "Phone" : "Email" %></td>
+                    <td>
+                      <span class="badge text-bg-<%= record.status === 'Accepted' ? 'success' : record.status === 'Rejected' ? 'danger' : 'warning' %> text-uppercase">
+                        <%= record.status %>
+                      </span>
+                    </td>
+                    <td>
+                      <% if (record.status === "Pending") { %>
+                        <div class="d-flex flex-wrap gap-2">
+                          <form action="/check-appointments/<%= record._id %>/accept" method="POST">
+                            <button type="submit" class="btn btn-sm btn-success">Accept</button>
+                          </form>
+                          <form action="/check-appointments/<%= record._id %>/reject" method="POST">
+                            <button type="submit" class="btn btn-sm btn-outline-danger">Reject</button>
+                          </form>
+                        </div>
+                      <% } else { %>
+                        <span class="text-muted small">No action</span>
+                      <% } %>
+                    </td>
+                    <td><%= new Date(record.createdAt).toLocaleString() %></td>
+                  <% } else { %>
+                    <td><%= doctorUser ? doctorUser.name : record.doctor_name || "-" %></td>
+                    <td>
+                      <%= record.specialization === "general_physician" ? "General Physician" : record.specialization === "orthopedic" ? "Orthopedic" : "Cardiology" %>
+                    </td>
+                    <td><%= record.appointment_date || "-" %></td>
+                    <td><%= record.time_slot || "-" %></td>
+                    <td>
+                      <span class="badge text-bg-<%= record.urgency_level === 'high' ? 'danger' : record.urgency_level === 'medium' ? 'warning' : 'success' %>">
+                        <%= record.urgency_level %>
+                      </span>
+                    </td>
+                    <td>
+                      <span class="badge text-bg-<%= record.status === 'Accepted' ? 'success' : record.status === 'Rejected' ? 'danger' : 'warning' %> text-uppercase">
+                        <%= record.status %>
+                      </span>
+                    </td>
+                    <td><%= new Date(record.createdAt).toLocaleString() %></td>
+                  <% } %>
+                </tr>
+              <% }) %>
+            <% } %>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,313 @@
+<% layout("layouts/boilerplate") %>
+
+<div class="py-4 py-lg-5">
+  <div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4">
+    <div>
+      <h1 class="h3 fw-bold mb-2">Staff Records</h1>
+      <p class="text-muted mb-0">Track staffing changes, coverage, and shift pressure from the admin side.</p>
+    </div>
+    <a href="/dashboard" class="btn btn-outline-primary">Dashboard</a>
+  </div>
+
+  <% if (message) { %>
+    <div class="alert alert-info"><%= message %></div>
+  <% } %>
+
+  <% if (staffAlert) { %>
+    <div class="alert alert-<%= staffAlertClass || 'info' %>"><%= staffAlert %></div>
+  <% } %>
+
+  <div class="row g-4 mb-4">
+    <div class="col-md-3">
+      <div class="card h-100">
+        <div class="card-body">
+          <div class="text-muted small">Total Staff</div>
+          <div class="h3 mb-0"><%= staffSummary ? staffSummary.totalStaff : 0 %></div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card h-100">
+        <div class="card-body">
+          <div class="text-muted small">Active Staff</div>
+          <div class="h3 mb-0"><%= staffSummary ? staffSummary.activeStaff : 0 %></div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card h-100">
+        <div class="card-body">
+          <div class="text-muted small">Required</div>
+          <div class="h3 mb-0"><%= staffSummary ? staffSummary.requiredStaff : 0 %></div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card h-100">
+        <div class="card-body">
+          <div class="text-muted small">Coverage</div>
+          <div class="h3 mb-0"><%= staffSummary ? staffSummary.coveragePct : 0 %>%</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-4 mb-4">
+    <div class="col-lg-7">
+      <div class="card h-100">
+        <div class="card-body p-4">
+          <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+            <h2 class="h5 mb-0">Staff Coverage</h2>
+            <span class="badge text-bg-light border">Prediction window: 3 days</span>
+          </div>
+
+          <div class="mb-3">
+            <div class="d-flex justify-content-between small text-muted mb-1">
+              <span>Coverage</span>
+              <span><%= staffSummary ? staffSummary.coveragePct : 0 %>%</span>
+            </div>
+            <div class="progress" style="height: 12px;">
+              <div
+                class="progress-bar <%= staffSummary && staffSummary.coveragePct < 85 ? 'bg-danger' : staffSummary && staffSummary.coveragePct < 100 ? 'bg-warning' : 'bg-success' %>"
+                role="progressbar"
+                style="width: <%= staffSummary ? Math.min(staffSummary.coveragePct, 100) : 0 %>%"
+                aria-valuenow="<%= staffSummary ? staffSummary.coveragePct : 0 %>"
+                aria-valuemin="0"
+                aria-valuemax="100"
+              ></div>
+            </div>
+          </div>
+
+          <div class="row g-3">
+            <div class="col-md-4">
+              <div class="border rounded-3 p-3 h-100">
+                <div class="text-muted small">Added Staff</div>
+                <div class="h4 mb-0"><%= staffSummary ? staffSummary.addedStaff : 0 %></div>
+              </div>
+            </div>
+            <div class="col-md-4">
+              <div class="border rounded-3 p-3 h-100">
+                <div class="text-muted small">Left Staff</div>
+                <div class="h4 mb-0"><%= staffSummary ? staffSummary.leftStaff : 0 %></div>
+              </div>
+            </div>
+            <div class="col-md-4">
+              <div class="border rounded-3 p-3 h-100">
+                <div class="text-muted small">Projected Active</div>
+                <div class="h4 mb-0"><%= staffProjection ? staffProjection.projected : (staffSummary ? staffSummary.activeStaff : 0) %></div>
+              </div>
+            </div>
+          </div>
+
+          <hr class="my-4">
+
+          <h3 class="h6 text-uppercase text-muted mb-3">Recent Active Coverage</h3>
+          <% const maxStaffCount = Math.max((staffSummary && staffSummary.totalStaff) || 0, (staffSummary && staffSummary.requiredStaff) || 0, 1); %>
+          <div class="mb-3">
+            <div class="d-flex justify-content-between small mb-1">
+              <span>Total Staff</span>
+              <span><%= staffSummary ? staffSummary.totalStaff : 0 %></span>
+            </div>
+            <div class="progress" style="height: 10px;">
+              <div class="progress-bar bg-primary" style="width: <%= Math.round(((staffSummary ? staffSummary.totalStaff : 0) / maxStaffCount) * 100) %>%"></div>
+            </div>
+          </div>
+          <div class="mb-3">
+            <div class="d-flex justify-content-between small mb-1">
+              <span>Active Staff</span>
+              <span><%= staffSummary ? staffSummary.activeStaff : 0 %></span>
+            </div>
+            <div class="progress" style="height: 10px;">
+              <div class="progress-bar bg-success" style="width: <%= Math.round(((staffSummary ? staffSummary.activeStaff : 0) / maxStaffCount) * 100) %>%"></div>
+            </div>
+          </div>
+          <div>
+            <div class="d-flex justify-content-between small mb-1">
+              <span>Required Staff</span>
+              <span><%= staffSummary ? staffSummary.requiredStaff : 0 %></span>
+            </div>
+            <div class="progress" style="height: 10px;">
+              <div class="progress-bar bg-warning" style="width: <%= Math.round(((staffSummary ? staffSummary.requiredStaff : 0) / maxStaffCount) * 100) %>%"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-5">
+      <div class="card h-100">
+        <div class="card-body p-4">
+          <h2 class="h5 mb-3">Staff Lookup</h2>
+          <form action="/staff-records" method="GET" class="row g-3">
+            <div class="col-12">
+              <label class="form-label">Choose Staff</label>
+              <select name="staff_user_id" class="form-select" onchange="this.form.submit()">
+                <option value="">Select a staff account</option>
+                <% staffUsers.forEach((staff) => { %>
+                  <option value="<%= staff._id %>" <%= selectedStaff && String(selectedStaff._id) === String(staff._id) ? 'selected' : '' %>><%= staff.first_name %> <%= staff.last_name %> | <%= staff.role %></option>
+                <% }) %>
+              </select>
+            </div>
+            <div class="col-12">
+              <button type="submit" class="btn btn-outline-primary w-100">Load Staff</button>
+            </div>
+          </form>
+
+          <% if (selectedStaff) { %>
+            <hr class="my-4">
+            <div class="border rounded-3 p-3 bg-light">
+              <div class="text-uppercase text-muted small mb-1">Selected Staff</div>
+              <h3 class="h5 mb-1"><%= selectedStaff.first_name %> <%= selectedStaff.last_name %></h3>
+              <div class="text-muted small"><%= selectedStaff.email %></div>
+              <div class="text-muted small">Role: <%= selectedStaff.role %></div>
+            </div>
+          <% } %>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card mb-4">
+    <div class="card-body p-4">
+      <h2 class="h5 mb-3">Record Staff Snapshot</h2>
+      <form action="/staff-records" method="POST" class="row g-3">
+        <input type="hidden" name="staff_user_id" value="<%= formData.staff_user_id || '' %>">
+
+        <div class="col-md-4">
+          <label class="form-label">Staff Name</label>
+          <input type="text" name="staff_name" class="form-control" value="<%= formData.staff_name || '' %>" readonly>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Staff Email</label>
+          <input type="email" name="staff_email" class="form-control" value="<%= formData.staff_email || '' %>" readonly>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Staff Role</label>
+          <select name="staff_role" class="form-select" required>
+            <option value="admin" <%= (formData.staff_role || '') === 'admin' ? 'selected' : '' %>>Admin</option>
+            <option value="doctor" <%= (formData.staff_role || 'doctor') === 'doctor' ? 'selected' : '' %>>Doctor</option>
+            <option value="nurse" <%= (formData.staff_role || '') === 'nurse' ? 'selected' : '' %>>Nurse</option>
+            <option value="technician" <%= (formData.staff_role || '') === 'technician' ? 'selected' : '' %>>Technician</option>
+            <option value="support" <%= (formData.staff_role || '') === 'support' ? 'selected' : '' %>>Support</option>
+          </select>
+        </div>
+
+        <div class="col-md-3">
+          <label class="form-label">Department</label>
+          <input type="text" name="department" class="form-control" value="<%= formData.department || '' %>" placeholder="ICU / ER / Surgery" required>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Shift</label>
+          <select name="shift" class="form-select" required>
+            <option value="morning" <%= (formData.shift || 'morning') === 'morning' ? 'selected' : '' %>>Morning</option>
+            <option value="afternoon" <%= (formData.shift || '') === 'afternoon' ? 'selected' : '' %>>Afternoon</option>
+            <option value="night" <%= (formData.shift || '') === 'night' ? 'selected' : '' %>>Night</option>
+            <option value="rotational" <%= (formData.shift || '') === 'rotational' ? 'selected' : '' %>>Rotational</option>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Action</label>
+          <select name="action_type" class="form-select" required>
+            <option value="added" <%= (formData.action_type || 'added') === 'added' ? 'selected' : '' %>>Added</option>
+            <option value="removed" <%= (formData.action_type || '') === 'removed' ? 'selected' : '' %>>Removed</option>
+            <option value="left" <%= (formData.action_type || '') === 'left' ? 'selected' : '' %>>Left</option>
+            <option value="on_leave" <%= (formData.action_type || '') === 'on_leave' ? 'selected' : '' %>>On Leave</option>
+            <option value="recommended" <%= (formData.action_type || '') === 'recommended' ? 'selected' : '' %>>Recommended</option>
+            <option value="updated" <%= (formData.action_type || '') === 'updated' ? 'selected' : '' %>>Updated</option>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Status</label>
+          <select name="status" class="form-select" required>
+            <option value="active" <%= (formData.status || 'active') === 'active' ? 'selected' : '' %>>Active</option>
+            <option value="inactive" <%= (formData.status || '') === 'inactive' ? 'selected' : '' %>>Inactive</option>
+            <option value="recommended" <%= (formData.status || '') === 'recommended' ? 'selected' : '' %>>Recommended</option>
+            <option value="pending" <%= (formData.status || '') === 'pending' ? 'selected' : '' %>>Pending</option>
+          </select>
+        </div>
+
+        <div class="col-md-2">
+          <label class="form-label">Total Staff</label>
+          <input type="number" name="total_staff" class="form-control" min="0" value="<%= formData.total_staff || 0 %>" required>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Active</label>
+          <input type="number" name="active_staff" class="form-control" min="0" value="<%= formData.active_staff || 0 %>" required>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Added</label>
+          <input type="number" name="added_staff" class="form-control" min="0" value="<%= formData.added_staff || 0 %>" required>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Left</label>
+          <input type="number" name="left_staff" class="form-control" min="0" value="<%= formData.left_staff || 0 %>" required>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Required</label>
+          <input type="number" name="required_staff" class="form-control" min="0" value="<%= formData.required_staff || 0 %>" required>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Effective Date</label>
+          <input type="date" name="effective_date" class="form-control" value="<%= formData.effective_date || '' %>" required>
+        </div>
+
+        <div class="col-md-6">
+          <label class="form-label">Recommendation</label>
+          <textarea name="recommendation" class="form-control" rows="2" placeholder="Optional recommendation"><%= formData.recommendation || '' %></textarea>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Notes</label>
+          <textarea name="notes" class="form-control" rows="2" placeholder="Optional note"><%= formData.notes || '' %></textarea>
+        </div>
+
+        <div class="col-12">
+          <button type="submit" class="btn btn-primary">Save Staff Snapshot</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-body p-4">
+      <h2 class="h5 mb-3">Recent Staff Records</h2>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+              <th>Staff</th>
+              <th>Role</th>
+              <th>Coverage</th>
+              <th>Action</th>
+              <th>Status</th>
+              <th>Date</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% if (!recentStaffRecords || recentStaffRecords.length === 0) { %>
+              <tr>
+                <td colspan="6" class="text-center py-4 text-muted">No staff records saved yet.</td>
+              </tr>
+            <% } else { %>
+              <% recentStaffRecords.forEach((record) => { %>
+                <tr>
+                  <td>
+                    <div class="fw-semibold"><%= record.staff_user_id && record.staff_user_id.first_name ? record.staff_user_id.first_name + " " + record.staff_user_id.last_name : record.staff_name %></div>
+                    <div class="text-muted small"><%= record.staff_email %></div>
+                  </td>
+                  <td><%= record.staff_role %></td>
+                  <td>
+                    <div>Total: <%= record.total_staff %></div>
+                    <div class="text-muted small">Active: <%= record.active_staff %> | Required: <%= record.required_staff %></div>
+                  </td>
+                  <td><%= record.action_type %></td>
+                  <td><span class="badge text-bg-secondary text-uppercase"><%= record.status %></span></td>
+                  <td><%= record.effective_date %></td>
+                </tr>
+              <% }) %>
+            <% } %>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>

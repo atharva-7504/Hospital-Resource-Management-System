@@ -58,20 +58,18 @@ const appointmentSchema = Joi.object({
   full_name: Joi.string().trim().min(2).max(120).required(),
   email: Joi.string().trim().lowercase().email({ tlds: { allow: false } }).required(),
   phone: Joi.string().pattern(/^[0-9]{10}$/).required(),
-  patient_type: Joi.string().valid("new", "existing").required(),
-  age: Joi.number().integer().min(0).max(120).allow(null).optional(),
-  date_of_birth: Joi.string().pattern(datePattern).allow("", null).optional(),
-  gender: Joi.string().valid("male", "female", "other", "prefer_not_to_say").required(),
   doctor_id: Joi.string().pattern(objectIdPattern).required(),
   doctor_name: Joi.string().trim().min(2).max(120).required(),
   specialization: Joi.string().valid("cardiology", "orthopedic", "general_physician").required(),
   appointment_date: Joi.string().pattern(datePattern).required(),
   time_slot: Joi.string().trim().min(3).max(20).required(),
   symptoms: Joi.string().trim().min(3).max(1000).required(),
-  department: Joi.string().trim().max(120).allow("").optional(),
+  patient_type: Joi.string().valid("new", "existing").default("existing"),
+  age: Joi.number().integer().min(0).max(120).allow(null).optional(),
+  date_of_birth: Joi.string().pattern(datePattern).allow("", null).optional(),
+  gender: Joi.string().valid("male", "female", "other", "prefer_not_to_say").default("prefer_not_to_say"),
   previous_visit: Joi.boolean().truthy("true").falsy("false", "", null).default(false),
-  urgency_level: Joi.string().valid("low", "medium", "high").default("low"),
-  preferred_contact_method: Joi.string().valid("phone", "email").required(),
+  urgency_level: Joi.string().valid("low", "medium", "high").default("medium"),
   consent: Joi.boolean().truthy("on", true).valid(true).required()
 }).required();
 
@@ -97,6 +95,14 @@ const bedAdmissionSchema = Joi.object({
   recorded_by: Joi.string().pattern(objectIdPattern).required()
 }).required();
 
+const bedRequestSchema = Joi.object({
+  appointment_id: Joi.string().pattern(objectIdPattern).required(),
+  bed_category: Joi.string().valid("normal", "critical", "icu").required(),
+  urgency_level: Joi.string().valid("low", "medium", "high").required(),
+  department: Joi.string().trim().max(120).allow("").optional(),
+  notes: Joi.string().trim().max(1000).allow("").optional()
+}).required();
+
 const staffRecordSchema = Joi.object({
   staff_user_id: Joi.string().pattern(objectIdPattern).required(),
   staff_name: Joi.string().trim().min(2).max(120).required(),
@@ -117,12 +123,24 @@ const staffRecordSchema = Joi.object({
   recorded_by: Joi.string().pattern(objectIdPattern).required()
 }).required();
 
+const doctorRosterSchema = Joi.object({
+  doctor_id: Joi.string().pattern(objectIdPattern).required(),
+  active: Joi.boolean().truthy("true", "on", "1").falsy("false", "", "0").required(),
+  department: Joi.string().trim().min(2).max(120).required(),
+  hospital_start_time: Joi.string().pattern(timePattern).required(),
+  hospital_end_time: Joi.string().pattern(timePattern).required(),
+  availability_days: Joi.array().items(Joi.string().valid(...weekdayOptions)).single().min(1).required(),
+  doctor_bio: Joi.string().trim().max(500).allow("").optional()
+}).required();
+
 module.exports = {
   objectIdPattern,
   signupSchema,
   loginSchema,
   appointmentSchema,
   bedAdmissionSchema,
+  bedRequestSchema,
   staffRecordSchema,
+  doctorRosterSchema,
   weekdayOptions
 };

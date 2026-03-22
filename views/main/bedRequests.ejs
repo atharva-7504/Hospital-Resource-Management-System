@@ -1,0 +1,241 @@
+<% layout("layouts/boilerplate") %>
+
+<% const acceptedRows = Array.isArray(acceptedAppointments) ? acceptedAppointments : []; %>
+<% const requestRowsValue = Array.isArray(requestRows) ? requestRows : []; %>
+<% const requestSummaryValue = typeof requestSummary !== "undefined" && requestSummary ? requestSummary : null; %>
+<% const selectedAppointmentValue = typeof selectedAppointment !== "undefined" && selectedAppointment ? selectedAppointment : null; %>
+<% const formValues = typeof formData !== "undefined" && formData ? formData : {}; %>
+<% const selectedAppointmentId = selectedAppointmentValue ? String(selectedAppointmentValue._id) : ""; %>
+
+<div class="py-4 py-lg-5">
+  <div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4">
+    <div>
+      <h1 class="h3 fw-bold mb-2">Bed Requests</h1>
+      <p class="text-muted mb-0">Pick one of your accepted patients, request the bed, and let admin approve it from the queue.</p>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+      <a href="/dashboard" class="btn btn-outline-primary btn-sm">Dashboard</a>
+      <a href="/check-appointments" class="btn btn-outline-secondary btn-sm">Accepted Patients</a>
+    </div>
+  </div>
+
+  <% if (typeof message !== "undefined" && message) { %>
+    <div class="alert alert-info"><%= message %></div>
+  <% } %>
+  <% if (typeof requestAlert !== "undefined" && requestAlert) { %>
+    <div class="alert alert-<%= requestAlertClass || 'info' %>"><%= requestAlert %></div>
+  <% } %>
+
+  <div class="row g-3 mb-4">
+    <div class="col-md-3">
+      <div class="card h-100">
+        <div class="card-body">
+          <div class="text-muted small">Accepted Patients</div>
+          <div class="h3 mb-0"><%= acceptedRows.length %></div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card h-100">
+        <div class="card-body">
+          <div class="text-muted small">Pending Requests</div>
+          <div class="h3 mb-0"><%= requestSummaryValue ? requestSummaryValue.pending : 0 %></div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card h-100">
+        <div class="card-body">
+          <div class="text-muted small">Approved</div>
+          <div class="h3 mb-0"><%= requestSummaryValue ? requestSummaryValue.approved : 0 %></div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card h-100">
+        <div class="card-body">
+          <div class="text-muted small">Rejected</div>
+          <div class="h3 mb-0"><%= requestSummaryValue ? requestSummaryValue.rejected : 0 %></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-4 mb-4">
+    <div class="col-lg-8">
+      <div class="card h-100">
+        <div class="card-body p-4">
+          <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+            <div>
+              <h2 class="h5 mb-1">Request a Bed</h2>
+              <p class="text-muted small mb-0">Use the accepted patient list below as the source of truth. No manual guessing.</p>
+            </div>
+            <span class="badge text-bg-light border"><%= acceptedRows.length %> selectable</span>
+          </div>
+
+          <% if (acceptedRows.length === 0) { %>
+            <div class="alert alert-warning mb-0">No accepted patients are available for a bed request yet.</div>
+          <% } else { %>
+            <form action="/bed-requests" method="POST" class="row g-3" data-bed-request-form>
+              <div class="col-md-12">
+                <label class="form-label">Accepted Patient</label>
+                <select name="appointment_id" class="form-select" required data-bed-request-appointment>
+                  <option value="">Choose an accepted patient</option>
+                  <% acceptedRows.forEach((appointment) => { %>
+                    <% const patientUser = appointment.user_id && appointment.user_id.first_name ? appointment.user_id : null; %>
+                    <% const appointmentName = patientUser ? patientUser.first_name + " " + patientUser.last_name : appointment.full_name || "-"; %>
+                    <option
+                      value="<%= appointment._id %>"
+                      <%= String(formValues.appointment_id || selectedAppointmentId) === String(appointment._id) ? "selected" : "" %>
+                      data-patient-name="<%= appointmentName %>"
+                      data-patient-email="<%= patientUser ? patientUser.email : appointment.email || '' %>"
+                      data-patient-phone="<%= appointment.phone || '' %>"
+                      data-doctor-name="<%= appointment.doctor_name || '' %>"
+                      data-appointment-date="<%= appointment.appointment_date || '' %>"
+                      data-time-slot="<%= appointment.time_slot || '' %>"
+                      data-symptoms="<%= appointment.symptoms || '' %>"
+                      data-urgency="<%= appointment.urgency_level || 'medium' %>"
+                      data-department="<%= appointment.department || '' %>"
+                    >
+                      <%= appointmentName %> | <%= appointment.appointment_date %> | <%= appointment.time_slot %>
+                    </option>
+                  <% }) %>
+                </select>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Bed Category</label>
+                <select name="bed_category" class="form-select" required>
+                  <option value="">Choose...</option>
+                  <option value="icu" <%= (formValues.bed_category || "") === "icu" ? "selected" : "" %>>ICU</option>
+                  <option value="critical" <%= (formValues.bed_category || "") === "critical" ? "selected" : "" %>>Critical Care</option>
+                  <option value="normal" <%= (formValues.bed_category || "") === "normal" ? "selected" : "" %>>Normal Ward</option>
+                </select>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Urgency</label>
+                <select name="urgency_level" class="form-select" required>
+                  <option value="low" <%= (formValues.urgency_level || "medium") === "low" ? "selected" : "" %>>Low</option>
+                  <option value="medium" <%= (formValues.urgency_level || "medium") === "medium" ? "selected" : "" %>>Medium</option>
+                  <option value="high" <%= (formValues.urgency_level || "medium") === "high" ? "selected" : "" %>>High</option>
+                </select>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Department</label>
+                <input type="text" name="department" class="form-control" value="<%= formValues.department || '' %>" placeholder="Auto-filled from appointment if blank">
+              </div>
+
+              <div class="col-12">
+                <label class="form-label">Notes</label>
+                <textarea name="notes" class="form-control" rows="4" placeholder="Reason for the bed request"><%= formValues.notes || "" %></textarea>
+              </div>
+
+              <div class="col-12 d-flex flex-wrap gap-2">
+                <button type="submit" class="btn btn-primary">Send Request</button>
+                <a href="/check-appointments" class="btn btn-outline-secondary">Review Accepted Patients</a>
+              </div>
+            </form>
+          <% } %>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-4">
+      <div class="card h-100">
+        <div class="card-body p-4">
+          <div class="d-flex justify-content-between align-items-center gap-2 mb-3">
+            <h2 class="h5 mb-0">Selected Patient</h2>
+            <span class="badge text-bg-light border" data-bed-request-status><%= selectedAppointmentValue ? "Ready" : "Waiting" %></span>
+          </div>
+
+          <% if (selectedAppointmentValue) { %>
+            <% const selectedPatient = selectedAppointmentValue.user_id && selectedAppointmentValue.user_id.first_name ? selectedAppointmentValue.user_id : null; %>
+            <div class="border rounded-3 p-3 bg-light mb-3">
+              <div class="fw-semibold mb-1" data-bed-request-patient-name><%= selectedPatient ? selectedPatient.first_name + " " + selectedPatient.last_name : selectedAppointmentValue.full_name || "-" %></div>
+              <div class="text-muted small" data-bed-request-patient-email><%= selectedPatient ? selectedPatient.email : selectedAppointmentValue.email || "-" %></div>
+              <div class="text-muted small" data-bed-request-patient-phone><%= selectedAppointmentValue.phone || "-" %></div>
+            </div>
+
+            <dl class="row small mb-0">
+              <dt class="col-5 text-muted fw-normal">Doctor</dt>
+              <dd class="col-7" data-bed-request-doctor><%= selectedAppointmentValue.doctor_name || doctorProfile?.name || "-" %></dd>
+
+              <dt class="col-5 text-muted fw-normal">Appointment</dt>
+              <dd class="col-7" data-bed-request-appointment-label><%= selectedAppointmentValue.appointment_date || "-" %> | <%= selectedAppointmentValue.time_slot || "-" %></dd>
+
+              <dt class="col-5 text-muted fw-normal">Symptoms</dt>
+              <dd class="col-7" data-bed-request-symptoms><%= selectedAppointmentValue.symptoms || "-" %></dd>
+
+              <dt class="col-5 text-muted fw-normal">Urgency</dt>
+              <dd class="col-7 text-uppercase" data-bed-request-urgency><%= selectedAppointmentValue.urgency_level || "medium" %></dd>
+            </dl>
+          <% } else { %>
+            <div class="alert alert-light border mb-0">Choose an accepted patient to see the preview here.</div>
+          <% } %>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-body p-4">
+      <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+        <div>
+          <h2 class="h5 mb-1">Request History</h2>
+          <p class="text-muted small mb-0">What you send here becomes a queue item for admin approval.</p>
+        </div>
+        <span class="badge text-bg-light border"><%= requestRowsValue.length %> total</span>
+      </div>
+
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+              <th>Patient</th>
+              <th>Category</th>
+              <th>Urgency</th>
+              <th>Status</th>
+              <th>Appointment</th>
+              <th>Requested</th>
+              <th>Resolved</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% if (requestRowsValue.length === 0) { %>
+              <tr>
+                <td colspan="7" class="text-center py-4 text-muted">No bed requests submitted yet.</td>
+              </tr>
+            <% } else { %>
+              <% requestRowsValue.forEach((record) => { %>
+                <% const appointment = record.appointment_id && record.appointment_id.full_name ? record.appointment_id : null; %>
+                <% const patientUser = appointment && appointment.user_id && appointment.user_id.first_name ? appointment.user_id : null; %>
+                <% const patientName = patientUser ? patientUser.first_name + " " + patientUser.last_name : record.patient_name || appointment?.full_name || "-"; %>
+                <% const requestStatus = String(record.status || "pending").toLowerCase(); %>
+                <% const requestBadgeClass = requestStatus === "approved" ? "success" : requestStatus === "rejected" ? "danger" : "warning"; %>
+                <tr>
+                  <td>
+                    <div class="fw-semibold"><%= patientName %></div>
+                    <div class="text-muted small"><%= record.patient_email || appointment?.email || "-" %></div>
+                  </td>
+                  <td><%= record.bed_category || "-" %></td>
+                  <td><%= record.urgency_level || "-" %></td>
+                  <td><span class="badge text-bg-<%= requestBadgeClass %> text-uppercase"><%= record.status || "pending" %></span></td>
+                  <td>
+                    <div><%= appointment ? appointment.appointment_date : "-" %></div>
+                    <div class="text-muted small"><%= appointment ? appointment.time_slot : "-" %></div>
+                  </td>
+                  <td><%= new Date(record.createdAt).toLocaleString() %></td>
+                  <td><%= record.resolved_at ? new Date(record.resolved_at).toLocaleString() : "-" %></td>
+                </tr>
+              <% }) %>
+            <% } %>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/js/bedRequests.js"></script>

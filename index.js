@@ -1,5 +1,6 @@
 require("dotenv").config();
 
+const crypto = require("crypto");
 const express = require("express");
 const ejsMate = require("ejs-mate");
 const path = require("path");
@@ -10,17 +11,20 @@ const passport = require("passport");
 const User = require("./models/users");
 const Doctor = require("./models/doctor");
 const AppointmentDetail = require("./models/appointmentDetail");
+const AppointmentNotification = require("./models/appointmentNotification");
 const BedAdmission = require("./models/bedAdmission");
-const StaffRecord = require("./models/staffRecord");
+const BedRequest = require("./models/bedRequest");
 const initializePassport = require("./config/passport");
-const { seedStaffRecords } = require("./init/staff_index");
+const { seedBedAdmissions } = require("./init/bed_admissions_index");
+const { buildAppointmentReceiptPdf, buildAppointmentReceiptFilename } = require("./utils/pdfReceipt");
 const {
   objectIdPattern,
   signupSchema,
   loginSchema,
   appointmentSchema,
   bedAdmissionSchema,
-  staffRecordSchema
+  bedRequestSchema,
+  doctorRosterSchema
 } = require("./utils/validation");
 
 const app = express();
@@ -49,27 +53,10 @@ const weekdayOptions = [
   "Sunday"
 ];
 
-const genderOptions = [
-  { value: "male", label: "Male" },
-  { value: "female", label: "Female" },
-  { value: "other", label: "Other" },
-  { value: "prefer_not_to_say", label: "Prefer not to say" }
-];
-
-const patientTypeOptions = [
-  { value: "new", label: "New Patient" },
-  { value: "existing", label: "Existing Patient" }
-];
-
 const urgencyOptions = [
   { value: "low", label: "Low" },
   { value: "medium", label: "Medium" },
   { value: "high", label: "High" }
-];
-
-const contactMethodOptions = [
-  { value: "phone", label: "Phone" },
-  { value: "email", label: "Email" }
 ];
 
 const specializationLabels = {
@@ -82,6 +69,34 @@ const roleLabels = {
   admin: "Admin",
   doctor: "Doctor",
   user: "Patient"
+};
+
+const bedCategoryLabels = {
+  normal: "Normal Ward",
+  critical: "Critical Care",
+  icu: "ICU"
+};
+
+const bedCategoryPrefixes = {
+  normal: "GW",
+  critical: "CCU",
+  icu: "ICU"
+};
+
+const staffRoleLabels = {
+  admin: "Admin",
+  doctor: "Doctor"
+};
+
+const staffStatusLabels = {
+  active: "Active",
+  inactive: "Inactive"
+};
+
+const requestStatusLabels = {
+  pending: "Pending",
+  approved: "Approved",
+  rejected: "Rejected"
 };
 
 const flashTypes = new Set(["success", "danger", "warning", "info"]);
@@ -271,6 +286,185 @@ const buildTimeSlots = (startTime, endTime, intervalMinutes = 30) => {
   return slots;
 };
 
+const getAppointmentStatusLabel = (status) => {
+  const normalized = String(status || "").trim().toLowerCase();
+  if (normalized === "accepted") return "Approved";
+  if (normalized === "pending") return "Pending approval";
+  if (normalized === "rejected") return "Rejected";
+  return String(status || "-");
+};
+
+const getAppointmentStatusBadgeClass = (status) => {
+  const normalized = String(status || "").trim().toLowerCase();
+  if (normalized === "accepted") return "success";
+  if (normalized === "rejected") return "danger";
+  return "warning";
+};
+
+const getUrgencyLabel = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return "-";
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+};
+
+const buildAppointmentCode = (appointmentDate = "") => {
+  const datePart = String(appointmentDate || getTodayDateString()).replace(/-/g, "");
+  const suffix = crypto.randomBytes(3).toString("hex").toUpperCase();
+  return `APT-${datePart}-${suffix}`;
+};
+
+const getStartOfWeek = (date = new Date()) => {
+  const weekStart = new Date(date);
+  const currentDay = weekStart.getDay();
+  const diff = currentDay === 0 ? -6 : 1 - currentDay;
+  weekStart.setDate(weekStart.getDate() + diff);
+  weekStart.setHours(0, 0, 0, 0);
+  return weekStart;
+};
+
+const buildWeeklyDoctorSchedule = (doctor) => {
+  if (!doctor) {
+    return [];
+  }
+
+  const weeklySlots = buildTimeSlots(doctor.hospital_start_time, doctor.hospital_end_time, doctor.slot_duration_minutes || 30);
+  const weekStart = getStartOfWeek();
+
+  return weekdayOptions.map((day, index) => {
+    const dayDate = new Date(weekStart);
+    dayDate.setDate(weekStart.getDate() + index);
+    const isAvailable = Boolean(doctor.active && doctor.availability_days?.includes(day));
+    return {
+      day,
+      dateLabel: dayDate.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+      timeWindow: isAvailable ? `${doctor.hospital_start_time || "-"} to ${doctor.hospital_end_time || "-"}` : "-",
+      slots: isAvailable ? weeklySlots : [],
+      available: isAvailable
+    };
+  });
+};
+
+const createAppointmentNotification = async ({
+  recipientRole,
+  recipientUserId = null,
+  appointmentId,
+  kind,
+  title,
+  message,
+  link
+}) => {
+  if (!appointmentId || !recipientRole || !kind || !title || !message || !link) {
+    return null;
+  }
+
+  try {
+    return await AppointmentNotification.create({
+      recipient_role: recipientRole,
+      recipient_user_id: recipientUserId || undefined,
+      appointment_id: appointmentId,
+      kind,
+      title,
+      message,
+      link
+    });
+  } catch (err) {
+    console.error("Unable to store appointment notification:", err);
+    return null;
+  }
+};
+
+const sendAppointmentDecisionNotifications = async (appointment, decision) => {
+  if (!appointment) {
+    return;
+  }
+
+  const normalizedDecision = String(decision || "").trim().toLowerCase() === "rejected" ? "rejected" : "approved";
+  const doctorUserId = appointment.doctor_id?.user_id ? String(appointment.doctor_id.user_id) : "";
+  const patientUserId = appointment.user_id?._id ? String(appointment.user_id._id) : "";
+  const appointmentLabel = `${appointment.appointment_date || "the selected date"} at ${appointment.time_slot || "the selected time"}`;
+  const title = normalizedDecision === "approved" ? "Appointment approved" : "Appointment rejected";
+  const doctorMessage = `${appointment.full_name || "A patient"} appointment for ${appointmentLabel} was ${normalizedDecision}.`;
+  const patientMessage = `Your appointment request for ${appointmentLabel} was ${normalizedDecision}.`;
+  const doctorLink = "/dashboard";
+
+  await Promise.all([
+    createAppointmentNotification({
+      recipientRole: "doctor",
+      recipientUserId: doctorUserId || null,
+      appointmentId: appointment._id,
+      kind: normalizedDecision === "approved" ? "request_approved" : "request_rejected",
+      title,
+      message: doctorMessage,
+      link: doctorLink
+    }),
+    createAppointmentNotification({
+      recipientRole: "user",
+      recipientUserId: patientUserId || null,
+      appointmentId: appointment._id,
+      kind: normalizedDecision === "approved" ? "request_approved" : "request_rejected",
+      title,
+      message: patientMessage,
+      link: "/check-status"
+    })
+  ]);
+};
+
+const buildAppointmentReceiptDocument = (appointment, { issuedAt = new Date() } = {}) => {
+  const doctor = appointment?.doctor_id && appointment.doctor_id.name ? appointment.doctor_id : null;
+  const patient = appointment?.user_id && appointment.user_id.first_name ? appointment.user_id : null;
+  const statusLabel = getAppointmentStatusLabel(appointment?.status);
+  const approvedByName = appointment?.approved_by && appointment.approved_by.first_name
+    ? getUserFullName(appointment.approved_by)
+    : "System Admin";
+  const patientName = appointment?.full_name || (patient ? getUserFullName(patient) : "-");
+
+  return {
+    brand: "CortexConnect",
+    title: "Appointment Receipt",
+    subtitle: appointment?.status === "Pending"
+      ? "Appointment request receipt pending admin approval"
+      : appointment?.status === "Rejected"
+        ? "Appointment request receipt with admin rejection"
+        : "Confirmed appointment details",
+    referenceNumber: appointment?.appointment_code || String(appointment?._id || "-"),
+    statusLabel,
+    issuedAt: issuedAt.toLocaleString(),
+    sections: [
+      {
+        heading: "Patient Details",
+        fields: [
+          { label: "Name", value: patientName },
+          { label: "Email", value: appointment?.email || patient?.email || "-" },
+          { label: "Phone", value: appointment?.phone || "-" },
+          { label: "Patient Type", value: appointment?.patient_type || "existing" }
+        ]
+      },
+      {
+        heading: "Doctor Details",
+        fields: [
+          { label: "Doctor", value: appointment?.doctor_name || doctor?.name || "-" },
+          { label: "Specialization", value: getSpecializationLabel(appointment?.specialization || doctor?.specialization) },
+          { label: "Department", value: doctor?.department || "-" }
+        ]
+      },
+      {
+        heading: "Appointment Details",
+        fields: [
+          { label: "Date", value: appointment?.appointment_date || "-" },
+          { label: "Time", value: appointment?.time_slot || "-" },
+          { label: "Urgency", value: getUrgencyLabel(appointment?.urgency_level || "medium") },
+          { label: "Status", value: statusLabel },
+          { label: "Submitted On", value: appointment?.createdAt ? new Date(appointment.createdAt).toLocaleString() : "-" },
+          { label: "Reviewed By", value: appointment?.approved_by ? approvedByName : "-" },
+          { label: "Reviewed At", value: appointment?.approved_at ? new Date(appointment.approved_at).toLocaleString() : "-" },
+          { label: "Symptoms", value: appointment?.symptoms || "-" }
+        ]
+      }
+    ],
+    footer: "This receipt is system generated. Keep it for hospital records and follow the admin approval status before visiting."
+  };
+};
+
 const computeProjection = (records, fieldName, horizonDays = 3) => {
   if (!records || records.length < 2) {
     return null;
@@ -335,10 +529,15 @@ const buildStaffSummary = (records) => {
     return null;
   }
 
-  const latest = records[0];
-  const totalStaff = toSafeNumber(latest.total_staff);
-  const activeStaff = toSafeNumber(latest.active_staff);
-  const requiredStaff = toSafeNumber(latest.required_staff);
+  const totalStaff = records.length;
+  const activeStaff = records.filter((record) => {
+    if (typeof record.active === "boolean") {
+      return record.active;
+    }
+
+    return String(record.status || "").toLowerCase() === "active";
+  }).length;
+  const requiredStaff = totalStaff;
   const coveragePct = requiredStaff > 0 ? Math.round((activeStaff / requiredStaff) * 100) : 0;
 
   return {
@@ -346,10 +545,288 @@ const buildStaffSummary = (records) => {
     activeStaff,
     requiredStaff,
     coveragePct,
-    addedStaff: toSafeNumber(latest.added_staff),
-    leftStaff: toSafeNumber(latest.left_staff),
-    shift: latest.shift,
-    latestDate: latest.effective_date
+    addedStaff: 0,
+    leftStaff: Math.max(totalStaff - activeStaff, 0),
+    shift: records[0]?.shift || "-",
+    latestDate: records[0]?.latestDate || records[0]?.effective_date || null
+  };
+};
+
+const normalizeBedCategory = (value, fallback = "icu") => {
+  const normalized = String(value || "").trim().toLowerCase();
+  return Object.prototype.hasOwnProperty.call(bedCategoryLabels, normalized) ? normalized : fallback;
+};
+
+const normalizeSearchTerm = (value) => String(value || "").trim().toLowerCase();
+
+const buildSearchText = (...values) => values
+  .flat()
+  .filter((value) => value !== null && value !== undefined && String(value).trim() !== "")
+  .map((value) => String(value).toLowerCase())
+  .join(" ");
+
+const getSpecializationLabel = (value) => {
+  const normalized = String(value || "").trim();
+  if (!normalized) return "-";
+  return specializationLabels[normalized] || normalized.replace(/_/g, " ").replace(/\b\w/g, (character) => character.toUpperCase());
+};
+
+const getStaffStatusLabel = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return "-";
+  return staffStatusLabels[normalized] || normalized.replace(/_/g, " ").replace(/\b\w/g, (character) => character.toUpperCase());
+};
+
+const getRequestStatusLabel = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return "-";
+  return requestStatusLabels[normalized] || normalized.replace(/_/g, " ").replace(/\b\w/g, (character) => character.toUpperCase());
+};
+
+const getBedCategoryPrefix = (value) => {
+  const normalized = normalizeBedCategory(value, "icu");
+  return bedCategoryPrefixes[normalized] || "BED";
+};
+
+const getBedCategoryLabel = (value) => bedCategoryLabels[normalizeBedCategory(value, "icu")] || "ICU";
+
+const buildBedAssignmentLabel = (bedCategory, startIndex, count = 1) => {
+  const prefix = getBedCategoryPrefix(bedCategory);
+  const firstLabel = `${prefix}-${String(Math.max(startIndex, 1)).padStart(3, "0")}`;
+  if (count <= 1) {
+    return firstLabel;
+  }
+
+  const lastLabel = `${prefix}-${String(Math.max(startIndex + count - 1, 1)).padStart(3, "0")}`;
+  return `${firstLabel} to ${lastLabel}`;
+};
+
+const buildBedRequestSummary = (records) => {
+  if (!records || !records.length) {
+    return null;
+  }
+
+  const summary = records.reduce((accumulator, record) => {
+    const status = String(record.status || "pending").toLowerCase();
+    if (status === "pending") accumulator.pending += 1;
+    if (status === "approved") accumulator.approved += 1;
+    if (status === "rejected") accumulator.rejected += 1;
+    return accumulator;
+  }, { pending: 0, approved: 0, rejected: 0 });
+
+  return {
+    totalRequests: records.length,
+    ...summary
+  };
+};
+
+const buildDoctorRosterRows = (staffUsers, doctorProfiles) => {
+  const doctorMap = new Map();
+
+  (doctorProfiles || []).forEach((doctor) => {
+    const userId = doctor?.user_id?._id || doctor?.user_id || doctor?.userId || null;
+    if (userId) {
+      doctorMap.set(String(userId), doctor);
+    }
+  });
+
+  return (staffUsers || []).map((user) => {
+    const userId = String(user._id);
+    const doctor = doctorMap.get(userId) || null;
+    const isAdmin = user.role === "admin";
+    const displayName = doctor?.name || getUserFullName(user);
+    const status = isAdmin ? "active" : doctor?.active ? "active" : "inactive";
+    const department = isAdmin ? "Administration" : doctor?.department || "-";
+    const startTime = isAdmin ? "-" : doctor?.hospital_start_time || "-";
+    const endTime = isAdmin ? "-" : doctor?.hospital_end_time || "-";
+    const availabilityDays = isAdmin ? [] : doctor?.availability_days || [];
+
+    return {
+      id: isAdmin ? userId : String(doctor?._id || userId),
+      doctor_id: isAdmin ? "" : String(doctor?._id || ""),
+      user_id: userId,
+      staff_name: displayName,
+      staff_role: user.role,
+      role_label: staffRoleLabels[user.role] || getSpecializationLabel(user.role),
+      specialization: isAdmin ? "administration" : doctor?.specialization || "general_physician",
+      specialization_label: isAdmin ? "Administration" : getSpecializationLabel(doctor?.specialization),
+      department,
+      status,
+      status_label: getStaffStatusLabel(status),
+      active: status === "active",
+      hospital_start_time: startTime,
+      hospital_end_time: endTime,
+      hours_label: isAdmin ? "-" : `${startTime} to ${endTime}`,
+      availability_days: availabilityDays,
+      availability_label: availabilityDays.length ? availabilityDays.join(", ") : "-",
+      doctor_bio: isAdmin ? "" : doctor?.doctor_bio || "",
+      effective_date: doctor?.updatedAt || user.updatedAt || user.createdAt || null,
+      latestDate: doctor?.updatedAt || user.updatedAt || user.createdAt || null
+    };
+  }).sort((a, b) => {
+    if (a.staff_role !== b.staff_role) {
+      return a.staff_role === "admin" ? -1 : 1;
+    }
+
+    return a.staff_name.localeCompare(b.staff_name);
+  });
+};
+
+const buildBedRequestFormData = ({ selectedAppointment, selectedDoctor, latestRequest }) => ({
+  appointment_id: selectedAppointment ? String(selectedAppointment._id) : "",
+  bed_category: String(latestRequest?.bed_category || ""),
+  urgency_level: String(latestRequest?.urgency_level || selectedAppointment?.urgency_level || "medium"),
+  department: String(latestRequest?.department || selectedAppointment?.department || selectedDoctor?.department || ""),
+  notes: String(latestRequest?.notes || selectedAppointment?.symptoms || "")
+});
+
+const buildDoctorRosterFormData = (selectedDoctor) => ({
+  doctor_id: selectedDoctor?.doctor_id ? String(selectedDoctor.doctor_id) : "",
+  active: selectedDoctor && selectedDoctor.status === "active" ? "true" : "false",
+  department: String(selectedDoctor?.department || ""),
+  hospital_start_time: String(selectedDoctor?.hospital_start_time || ""),
+  hospital_end_time: String(selectedDoctor?.hospital_end_time || ""),
+  availability_days: selectedDoctor?.availability_days || [],
+  doctor_bio: String(selectedDoctor?.doctor_bio || "")
+});
+
+const getLatestBedAdmissionSnapshot = async (bedCategory) => {
+  const normalizedCategory = normalizeBedCategory(bedCategory, "icu");
+  return BedAdmission.findOne({ bed_category: normalizedCategory })
+    .sort({ admission_date: -1, createdAt: -1 })
+    .lean();
+};
+
+const buildAdmissionPayloadFromRequest = (requestRecord, latestAdmission, approvedById) => {
+  if (!requestRecord) {
+    return null;
+  }
+
+  const bedCategory = normalizeBedCategory(requestRecord.bed_category, "icu");
+  const totalBeds = toSafeNumber(latestAdmission?.total_beds, 50);
+  const occupiedBeds = toSafeNumber(latestAdmission?.occupied_beds, 0);
+  const bedRequired = Math.max(toSafeNumber(requestRecord.bed_required, 1), 1);
+  const freeBeds = Math.max(totalBeds - occupiedBeds, 0);
+
+  if (bedRequired > freeBeds) {
+    return {
+      error: `Only ${freeBeds} ${getBedCategoryLabel(bedCategory)} bed${freeBeds === 1 ? "" : "s"} are currently free.`
+    };
+  }
+
+  return {
+    patient_user_id: requestRecord.patient_user_id?._id || requestRecord.patient_user_id,
+    patient_name: requestRecord.patient_name,
+    patient_email: requestRecord.patient_email,
+    patient_phone: requestRecord.patient_phone,
+    bed_category: bedCategory,
+    bed_required: bedRequired,
+    bed_assigned: buildBedAssignmentLabel(bedCategory, occupiedBeds + 1, bedRequired),
+    total_beds: totalBeds,
+    occupied_beds: occupiedBeds + bedRequired,
+    admissions_today: toSafeNumber(latestAdmission?.admissions_today, 0) + 1,
+    discharges_today: toSafeNumber(latestAdmission?.discharges_today, 0),
+    expected_discharges_next_days: toSafeNumber(latestAdmission?.expected_discharges_next_days, 0),
+    admission_date: getTodayDateString(),
+    status: "admitted",
+    urgency_level: requestRecord.urgency_level || "medium",
+    department: requestRecord.department || getBedCategoryLabel(bedCategory),
+    notes: requestRecord.notes || undefined,
+    recorded_by: approvedById,
+    source_request_id: requestRecord._id,
+    approved_by: approvedById,
+    approved_at: new Date()
+  };
+};
+
+const loadDoctorBedRequestContext = async ({ userId, appointmentId = "" }) => {
+  const doctorProfile = await findDoctorByUserId(userId);
+  if (!doctorProfile) {
+    return {
+      doctorProfile: null,
+      acceptedAppointments: [],
+      requestRows: [],
+      selectedAppointment: null,
+      latestRequest: null,
+      formData: buildBedRequestFormData({})
+    };
+  }
+
+  const [acceptedAppointments, requestRows] = await Promise.all([
+    AppointmentDetail.find({ doctor_id: doctorProfile._id, status: "Accepted" })
+      .sort({ createdAt: -1 })
+      .populate("user_id doctor_id")
+      .lean(),
+    BedRequest.find({ requested_by: userId })
+      .sort({ createdAt: -1 })
+      .populate("appointment_id patient_user_id doctor_id requested_by resolved_by")
+      .lean()
+  ]);
+
+  const selectedAppointment = acceptedAppointments.find((record) => String(record._id) === String(appointmentId))
+    || acceptedAppointments[0]
+    || null;
+
+  const latestRequest = selectedAppointment
+    ? requestRows.find((record) => String(record.appointment_id?._id || record.appointment_id) === String(selectedAppointment._id)) || null
+    : requestRows[0] || null;
+
+  return {
+    doctorProfile,
+    acceptedAppointments,
+    requestRows,
+    selectedAppointment,
+    latestRequest,
+    formData: buildBedRequestFormData({
+      selectedAppointment,
+      selectedDoctor: doctorProfile,
+      latestRequest
+    }),
+    requestSummary: buildBedRequestSummary(requestRows)
+  };
+};
+
+const loadStaffRosterContext = async ({ doctorId = "", search = "" } = {}) => {
+  const [staffUsers, doctorProfiles] = await Promise.all([
+    User.find({ role: { $in: ["admin", "doctor"] } })
+      .sort({ first_name: 1, last_name: 1 })
+      .lean(),
+    Doctor.find({})
+      .populate("user_id")
+      .sort({ name: 1 })
+      .lean()
+  ]);
+
+  const rosterRows = buildDoctorRosterRows(staffUsers, doctorProfiles);
+  const normalizedSearch = normalizeSearchTerm(search);
+  const filteredRoster = normalizedSearch
+    ? rosterRows.filter((record) => {
+      const searchableText = buildSearchText(
+        record.staff_name,
+        record.staff_role,
+        record.department,
+        record.specialization_label,
+        record.status_label,
+        record.hours_label,
+        record.availability_label
+      );
+      return searchableText.includes(normalizedSearch);
+    })
+    : rosterRows;
+
+  const doctorRows = rosterRows.filter((record) => record.staff_role === "doctor");
+  const selectedDoctorRow = doctorRows.find((record) => String(record.doctor_id) === String(doctorId))
+    || doctorRows[0]
+    || null;
+
+  return {
+    rosterRows,
+    filteredRoster,
+    doctorRows,
+    selectedDoctorRow,
+    formData: buildDoctorRosterFormData(selectedDoctorRow),
+    staffSummary: buildStaffSummary(rosterRows),
+    matchingCount: filteredRoster.length
   };
 };
 
@@ -390,25 +867,6 @@ const buildBedAdmissionFormData = ({ selectedPatient, latestAdmission, patientPh
   notes: String(latestAdmission?.notes || "")
 });
 
-const buildStaffRecordFormData = ({ selectedStaff, latestRecord }) => ({
-  staff_user_id: selectedStaff?._id ? String(selectedStaff._id) : "",
-  staff_name: selectedStaff ? getUserFullName(selectedStaff) : String(latestRecord?.staff_name || ""),
-  staff_email: selectedStaff ? String(selectedStaff.email || "") : String(latestRecord?.staff_email || ""),
-  staff_role: String(latestRecord?.staff_role || selectedStaff?.role || "doctor"),
-  department: String(latestRecord?.department || ""),
-  shift: String(latestRecord?.shift || "morning"),
-  action_type: String(latestRecord?.action_type || "added"),
-  status: String(latestRecord?.status || "active"),
-  total_staff: String(latestRecord?.total_staff || 0),
-  active_staff: String(latestRecord?.active_staff || 0),
-  added_staff: String(latestRecord?.added_staff || 0),
-  left_staff: String(latestRecord?.left_staff || 0),
-  required_staff: String(latestRecord?.required_staff || 0),
-  effective_date: String(latestRecord?.effective_date || getTodayDateString()),
-  recommendation: String(latestRecord?.recommendation || ""),
-  notes: String(latestRecord?.notes || "")
-});
-
 const getWeekdayName = (dateString) => {
   if (!dateString) return "";
   const date = new Date(`${dateString}T00:00:00`);
@@ -418,10 +876,14 @@ const getWeekdayName = (dateString) => {
 
 const getAvailableSlots = async (doctorId, appointmentDate) => {
   const doctor = await Doctor.findById(doctorId).lean();
-  if (!doctor) return [];
+  if (!doctor || doctor.active === false) return [];
+
+  const baseSlots = doctor.hospital_start_time && doctor.hospital_end_time
+    ? buildTimeSlots(doctor.hospital_start_time, doctor.hospital_end_time, doctor.slot_duration_minutes || 30)
+    : doctor.time_slots || [];
 
   if (!appointmentDate) {
-    return doctor.time_slots || [];
+    return baseSlots;
   }
 
   const weekday = getWeekdayName(appointmentDate);
@@ -435,7 +897,7 @@ const getAvailableSlots = async (doctorId, appointmentDate) => {
   }).select("time_slot").lean();
 
   const bookedSlots = new Set(bookedAppointments.map((record) => record.time_slot));
-  return (doctor.time_slots || []).filter((slot) => !bookedSlots.has(slot));
+  return baseSlots.filter((slot) => !bookedSlots.has(slot));
 };
 
 const seedDoctors = async () => {
@@ -896,7 +1358,9 @@ app.get("/doctors", ensureRole("user"), async (req, res, next) => {
     for (const doctor of doctors) {
       const availableSlots = appointmentDate
         ? await getAvailableSlots(doctor._id.toString(), appointmentDate)
-        : doctor.time_slots || [];
+        : doctor.hospital_start_time && doctor.hospital_end_time
+          ? buildTimeSlots(doctor.hospital_start_time, doctor.hospital_end_time, doctor.slot_duration_minutes || 30)
+          : doctor.time_slots || [];
       const weekday = getWeekdayName(appointmentDate);
       const isOpen = appointmentDate
         ? Boolean(weekday && doctor.availability_days.includes(weekday) && availableSlots.length)
@@ -930,19 +1394,13 @@ app.get("/appointment", ensureRole("user"), async (req, res, next) => {
     const appointmentDate = String(req.query.appointment_date || latestAppointment?.appointment_date || "");
     const selectedDoctor = doctorId ? await Doctor.findById(doctorId).lean() : null;
     const availableSlots = selectedDoctor ? await getAvailableSlots(doctorId, appointmentDate) : [];
-    const patientType = latestAppointment ? "existing" : "new";
     const fullName = getUserFullName(req.user);
 
     res.render("appointment/form", {
       title: "Appointment",
       formData: {
-        user_id: String(userId),
         full_name: String(req.query.full_name || fullName || ""),
         email: String(req.query.email || req.user.email || ""),
-        age: String(req.query.age || latestAppointment?.age || ""),
-        date_of_birth: String(req.query.date_of_birth || latestAppointment?.date_of_birth || ""),
-        gender: String(req.query.gender || latestAppointment?.gender || ""),
-        patient_type: req.query.patient_type || patientType,
         phone: String(req.query.phone || latestAppointment?.phone || ""),
         doctor_id: selectedDoctor?._id?.toString() || latestAppointment?.doctor_id || "",
         doctor_name: selectedDoctor?.name || latestAppointment?.doctor_name || "",
@@ -950,20 +1408,14 @@ app.get("/appointment", ensureRole("user"), async (req, res, next) => {
         appointment_date: appointmentDate,
         time_slot: String(req.query.time_slot || latestAppointment?.time_slot || ""),
         symptoms: String(req.query.symptoms || latestAppointment?.symptoms || ""),
-        department: String(req.query.department || latestAppointment?.department || ""),
-        previous_visit: String(req.query.previous_visit || (latestAppointment ? "true" : "false")),
         urgency_level: String(req.query.urgency_level || latestAppointment?.urgency_level || "low"),
-        preferred_contact_method: String(req.query.preferred_contact_method || latestAppointment?.preferred_contact_method || "phone"),
         consent: req.query.consent === "on"
       },
       selectedDoctor,
       availableSlots,
       specializationOptions,
-      genderOptions,
-      patientTypeOptions,
       urgencyOptions,
-      contactMethodOptions,
-        message: String(req.query.message || "")
+      message: String(req.query.message || "")
       });
   } catch (err) {
     next(err);
@@ -973,24 +1425,17 @@ app.get("/appointment", ensureRole("user"), async (req, res, next) => {
 app.post("/appointment", ensureRole("user"), async (req, res, next) => {
   const userId = req.user._id;
   const rawSubmission = {
-    user_id: userId,
+    user_id: String(userId),
     full_name: String(req.body.full_name || getUserFullName(req.user) || "").trim(),
     email: String(req.body.email || req.user.email || "").trim(),
     phone: String(req.body.phone || "").trim(),
-    patient_type: String(req.body.patient_type || "existing").trim(),
-    age: String(req.body.age || "").trim() || null,
-    date_of_birth: String(req.body.date_of_birth || "").trim(),
-    gender: String(req.body.gender || "").trim(),
     doctor_id: String(req.body.doctor_id || "").trim(),
     doctor_name: String(req.body.doctor_name || "").trim(),
     specialization: String(req.body.specialization || "").trim(),
     appointment_date: String(req.body.appointment_date || "").trim(),
     time_slot: String(req.body.time_slot || "").trim(),
     symptoms: String(req.body.symptoms || "").trim(),
-    department: String(req.body.department || "").trim(),
-    previous_visit: String(req.body.previous_visit || "false"),
     urgency_level: String(req.body.urgency_level || "low").trim(),
-    preferred_contact_method: String(req.body.preferred_contact_method || "phone").trim(),
     consent: req.body.consent
   };
 
@@ -1003,10 +1448,7 @@ app.post("/appointment", ensureRole("user"), async (req, res, next) => {
         selectedDoctor,
         availableSlots: [],
         specializationOptions,
-        genderOptions,
-        patientTypeOptions,
         urgencyOptions,
-        contactMethodOptions,
         message: "Please select a doctor first."
       });
     }
@@ -1027,17 +1469,12 @@ app.post("/appointment", ensureRole("user"), async (req, res, next) => {
         selectedDoctor,
         availableSlots: selectedDoctor ? await getAvailableSlots(rawSubmission.doctor_id, rawSubmission.appointment_date) : [],
         specializationOptions,
-        genderOptions,
-        patientTypeOptions,
         urgencyOptions,
-        contactMethodOptions,
         message: getValidationMessage(validation.error, "Please check the appointment details.")
       });
     }
 
     const submission = validation.value;
-    const age = submission.age ?? null;
-    const dateOfBirth = String(submission.date_of_birth || "").trim();
     const fullName = getUserFullName(req.user);
     const email = String(req.user.email || submission.email || "").trim();
 
@@ -1048,30 +1485,24 @@ app.post("/appointment", ensureRole("user"), async (req, res, next) => {
         selectedDoctor: null,
         availableSlots: [],
         specializationOptions,
-        genderOptions,
-        patientTypeOptions,
         urgencyOptions,
-        contactMethodOptions,
         message: "Please select a doctor first."
       });
     }
 
-    const availableSlots = await getAvailableSlots(submission.doctor_id, submission.appointment_date);
-
-    if (age === null && !dateOfBirth) {
+    if (selectedDoctor.active === false) {
       return res.status(400).render("appointment/form", {
         title: "Appointment",
         formData: submission,
         selectedDoctor,
-        availableSlots,
+        availableSlots: [],
         specializationOptions,
-        genderOptions,
-        patientTypeOptions,
         urgencyOptions,
-        contactMethodOptions,
-        message: "Please enter either age or date of birth."
+        message: "Selected doctor is not accepting appointments right now."
       });
     }
+
+    const availableSlots = await getAvailableSlots(submission.doctor_id, submission.appointment_date);
 
     if (selectedDoctor.specialization !== submission.specialization) {
       return res.status(400).render("appointment/form", {
@@ -1080,11 +1511,20 @@ app.post("/appointment", ensureRole("user"), async (req, res, next) => {
         selectedDoctor,
         availableSlots,
         specializationOptions,
-        genderOptions,
-        patientTypeOptions,
         urgencyOptions,
-        contactMethodOptions,
         message: "Doctor specialization does not match your selection."
+      });
+    }
+
+    if (submission.appointment_date < getTodayDateString()) {
+      return res.status(400).render("appointment/form", {
+        title: "Appointment",
+        formData: submission,
+        selectedDoctor,
+        availableSlots,
+        specializationOptions,
+        urgencyOptions,
+        message: "Appointment date cannot be in the past."
       });
     }
 
@@ -1096,10 +1536,7 @@ app.post("/appointment", ensureRole("user"), async (req, res, next) => {
         selectedDoctor,
         availableSlots,
         specializationOptions,
-        genderOptions,
-        patientTypeOptions,
         urgencyOptions,
-        contactMethodOptions,
         message: "The selected doctor is not available on that date."
       });
     }
@@ -1111,20 +1548,19 @@ app.post("/appointment", ensureRole("user"), async (req, res, next) => {
         selectedDoctor,
         availableSlots,
         specializationOptions,
-        genderOptions,
-        patientTypeOptions,
         urgencyOptions,
-        contactMethodOptions,
         message: "That time slot is already booked."
       });
     }
 
-    await AppointmentDetail.create({
+    const appointmentCode = buildAppointmentCode(submission.appointment_date);
+    const createdAppointment = await AppointmentDetail.create({
+      appointment_code: appointmentCode,
       user_id: userId,
       patient_type: submission.patient_type,
       full_name: fullName,
-      age: age ?? undefined,
-      date_of_birth: dateOfBirth || undefined,
+      age: submission.age ?? undefined,
+      date_of_birth: submission.date_of_birth || undefined,
       gender: submission.gender,
       email,
       phone: submission.phone,
@@ -1134,14 +1570,35 @@ app.post("/appointment", ensureRole("user"), async (req, res, next) => {
       appointment_date: submission.appointment_date,
       time_slot: submission.time_slot,
       symptoms: submission.symptoms,
-      department: submission.department || specializationLabels[submission.specialization] || "",
       previous_visit: submission.previous_visit,
       urgency_level: submission.urgency_level,
-      preferred_contact_method: submission.preferred_contact_method,
-      consent: submission.consent
+      consent: submission.consent,
+      status: "Pending"
     });
 
-    flashSuccess(req, "Appointment booked successfully.");
+    const doctorUserId = selectedDoctor.user_id ? String(selectedDoctor.user_id) : "";
+    const requestMessage = `${fullName} submitted an appointment request for ${submission.appointment_date} at ${submission.time_slot}.`;
+    await Promise.all([
+      createAppointmentNotification({
+        recipientRole: "doctor",
+        recipientUserId: doctorUserId || null,
+        appointmentId: createdAppointment._id,
+        kind: "request_submitted",
+        title: "New appointment request",
+        message: requestMessage,
+        link: "/dashboard"
+      }),
+      createAppointmentNotification({
+        recipientRole: "admin",
+        appointmentId: createdAppointment._id,
+        kind: "request_submitted",
+        title: "Appointment waiting for approval",
+        message: requestMessage,
+        link: "/check-appointments"
+      })
+    ]);
+
+    flashSuccess(req, "Appointment request submitted. Your receipt is ready to download.");
     res.redirect("/check-status");
   } catch (err) {
     if (err && err.code === 11000) {
@@ -1155,10 +1612,7 @@ app.post("/appointment", ensureRole("user"), async (req, res, next) => {
           ? await getAvailableSlots(String(req.body.doctor_id || "").trim(), String(req.body.appointment_date || "").trim())
           : [],
         specializationOptions,
-        genderOptions,
-        patientTypeOptions,
         urgencyOptions,
-        contactMethodOptions,
         message: "That doctor and time slot combination is already booked."
       });
     }
@@ -1173,10 +1627,7 @@ app.post("/appointment", ensureRole("user"), async (req, res, next) => {
           ? await getAvailableSlots(String(req.body.doctor_id || "").trim(), String(req.body.appointment_date || "").trim())
           : [],
         specializationOptions,
-        genderOptions,
-        patientTypeOptions,
         urgencyOptions,
-        contactMethodOptions,
         message: getMongooseErrorMessage(err, "Please check the appointment details.")
       });
     }
@@ -1200,6 +1651,40 @@ app.get("/check-status", ensureRole("user"), async (req, res, next) => {
   }
 });
 
+app.get("/appointments/:id/receipt.pdf", ensureRole("admin", "user"), async (req, res, next) => {
+  try {
+    const appointment = await AppointmentDetail.findById(req.params.id)
+      .populate("user_id doctor_id approved_by")
+      .lean();
+
+    if (!appointment) {
+      return redirectWithFlash(
+        req,
+        res,
+        req.user.role === "admin" ? "/check-appointments" : "/check-status",
+        "warning",
+        "Appointment not found."
+      );
+    }
+
+    const belongsToUser = String(appointment.user_id?._id || appointment.user_id) === String(req.user._id);
+    if (req.user.role !== "admin" && !belongsToUser) {
+      return redirectWithFlash(req, res, "/check-status", "warning", "You can only download your own appointment receipt.");
+    }
+
+    const receiptDocument = buildAppointmentReceiptDocument(appointment);
+    const receiptBuffer = buildAppointmentReceiptPdf(receiptDocument);
+    const fileName = buildAppointmentReceiptFilename(appointment.appointment_code || appointment._id);
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    res.setHeader("Cache-Control", "no-store");
+    res.send(receiptBuffer);
+  } catch (err) {
+    next(err);
+  }
+});
+
 app.get("/check-appointments", ensureRole("admin", "doctor"), async (req, res, next) => {
   try {
     const isAdmin = req.user?.role === "admin";
@@ -1217,7 +1702,7 @@ app.get("/check-appointments", ensureRole("admin", "doctor"), async (req, res, n
         : [];
 
     res.render("appointment/status", {
-      title: isAdmin ? "Check Appointments" : "Accepted Patients",
+      title: isAdmin ? "Appointment Queue" : "Approved Patients",
       records,
       adminMode: isAdmin,
       viewerMode: isAdmin ? "admin" : "doctor",
@@ -1233,19 +1718,25 @@ app.post("/check-appointments/:id/accept", ensureRole("admin"), async (req, res,
     const updatedAppointment = await AppointmentDetail.findByIdAndUpdate(
       req.params.id,
       {
-        status: "Accepted"
+        status: "Accepted",
+        approved_by: req.user._id,
+        approved_at: new Date()
       },
       {
         runValidators: true,
         new: true
       }
-    );
+    )
+      .populate("user_id doctor_id approved_by")
+      .lean();
 
     if (!updatedAppointment) {
       return redirectWithFlash(req, res, "/check-appointments", "warning", "Appointment not found.");
     }
 
-    flashSuccess(req, "Appointment accepted.");
+    await sendAppointmentDecisionNotifications(updatedAppointment, "approved");
+
+    flashSuccess(req, "Appointment approved.");
     res.redirect("/check-appointments");
   } catch (err) {
     next(err);
@@ -1257,17 +1748,23 @@ app.post("/check-appointments/:id/reject", ensureRole("admin"), async (req, res,
     const updatedAppointment = await AppointmentDetail.findByIdAndUpdate(
       req.params.id,
       {
-        status: "Rejected"
+        status: "Rejected",
+        approved_by: req.user._id,
+        approved_at: new Date()
       },
       {
         runValidators: true,
         new: true
       }
-    );
+    )
+      .populate("user_id doctor_id approved_by")
+      .lean();
 
     if (!updatedAppointment) {
       return redirectWithFlash(req, res, "/check-appointments", "warning", "Appointment not found.");
     }
+
+    await sendAppointmentDecisionNotifications(updatedAppointment, "rejected");
 
     flashSuccess(req, "Appointment rejected.");
     res.redirect("/check-appointments");
@@ -1296,61 +1793,305 @@ app.get("/about", (req, res) => {
   });
 });
 
-app.get("/bed-admissions", ensureRole("admin"), async (req, res, next) => {
+app.get("/bed-requests", ensureRole("doctor"), async (req, res, next) => {
   try {
-    const patientUserId = String(req.query.patient_user_id || "").trim();
-    const patients = await User.find({ role: "user" }).sort({ first_name: 1, last_name: 1 }).lean();
-    const selectedPatient = await findUserById(patientUserId);
-    const latestBedAdmission = selectedPatient
-      ? await BedAdmission.findOne({ patient_user_id: selectedPatient._id }).sort({ createdAt: -1 }).lean()
-      : await BedAdmission.findOne().sort({ createdAt: -1 }).lean();
-    const latestPatientAppointment = selectedPatient
-      ? await AppointmentDetail.findOne({ user_id: selectedPatient._id }).sort({ createdAt: -1 }).lean()
-      : null;
-    const recentAdmissions = await BedAdmission.find({})
-      .sort({ createdAt: -1 })
-      .limit(8)
-      .populate("patient_user_id recorded_by")
-      .lean();
+    const context = await loadDoctorBedRequestContext({
+      userId: req.user._id,
+      appointmentId: String(req.query.appointment_id || "")
+    });
 
-    const bedSummary = buildBedSummary(recentAdmissions);
-    const bedProjection = computeProjection(recentAdmissions, "occupied_beds", 3);
-    const freeBeds = bedSummary ? bedSummary.freeBeds : 0;
-    const occupancyPct = bedSummary ? bedSummary.occupancyPct : 0;
+    res.render("main/bedRequests", {
+      title: "Bed Requests",
+      ...context,
+      message: String(req.query.message || "")
+    });
+  } catch (err) {
+    next(err);
+  }
+});
 
-    let bedAlert = "";
-    let bedAlertClass = "info";
-    if (bedSummary) {
-      if (occupancyPct >= 90 || freeBeds <= 5) {
-        bedAlert = "Limited beds available. Add capacity or speed up discharges to avoid disruption.";
-        bedAlertClass = "danger";
-      } else if (occupancyPct >= 80) {
-        bedAlert = "Bed usage is rising. Keep an eye on ICU and critical bed availability.";
-        bedAlertClass = "warning";
-      } else {
-        bedAlert = "Bed capacity is currently under control.";
-        bedAlertClass = "success";
-      }
+app.post("/bed-requests", ensureRole("doctor"), async (req, res, next) => {
+  const rawSubmission = {
+    appointment_id: String(req.body.appointment_id || "").trim(),
+    bed_category: String(req.body.bed_category || "").trim(),
+    urgency_level: String(req.body.urgency_level || "").trim(),
+    department: String(req.body.department || "").trim(),
+    notes: String(req.body.notes || "").trim()
+  };
+
+  try {
+    const validation = bedRequestSchema.validate(rawSubmission, {
+      abortEarly: true,
+      stripUnknown: true
+    });
+
+    const context = await loadDoctorBedRequestContext({
+      userId: req.user._id,
+      appointmentId: rawSubmission.appointment_id
+    });
+
+    const selectedAppointment = context.acceptedAppointments.find((record) => String(record._id) === rawSubmission.appointment_id) || null;
+
+    if (validation.error) {
+      return res.status(400).render("main/bedRequests", {
+        title: "Bed Requests",
+        ...context,
+        selectedAppointment,
+        formData: {
+          ...context.formData,
+          ...rawSubmission
+        },
+        requestAlert: "Please correct the highlighted bed request details.",
+        requestAlertClass: "danger",
+        message: getValidationMessage(validation.error, "Please check the bed request details.")
+      });
     }
 
-    const formData = buildBedAdmissionFormData({
-      selectedPatient,
-      latestAdmission: latestBedAdmission,
-      patientPhone: latestPatientAppointment?.phone || ""
+    if (!context.doctorProfile) {
+      return res.status(400).render("main/bedRequests", {
+        title: "Bed Requests",
+        ...context,
+        formData: {
+          ...context.formData,
+          ...rawSubmission
+        },
+        requestAlert: "No doctor profile found for this account.",
+        requestAlertClass: "danger",
+        message: "No doctor profile found for this account."
+      });
+    }
+
+    if (!selectedAppointment) {
+      return res.status(400).render("main/bedRequests", {
+        title: "Bed Requests",
+        ...context,
+        formData: {
+          ...context.formData,
+          ...rawSubmission
+        },
+        requestAlert: "Please choose one of your accepted patients.",
+        requestAlertClass: "danger",
+        message: "Please choose one of your accepted patients."
+      });
+    }
+
+    if (String(selectedAppointment.status) !== "Accepted") {
+      return res.status(400).render("main/bedRequests", {
+        title: "Bed Requests",
+        ...context,
+        selectedAppointment,
+        formData: {
+          ...context.formData,
+          ...rawSubmission
+        },
+        requestAlert: "Only accepted patients can be sent for bed approval.",
+        requestAlertClass: "danger",
+        message: "Only accepted patients can be sent for bed approval."
+      });
+    }
+
+    const existingRequest = await BedRequest.findOne({
+      appointment_id: selectedAppointment._id,
+      status: { $in: ["pending", "approved"] }
+    }).lean();
+
+    if (existingRequest) {
+      return res.status(400).render("main/bedRequests", {
+        title: "Bed Requests",
+        ...context,
+        selectedAppointment,
+        formData: {
+          ...context.formData,
+          ...rawSubmission
+        },
+        requestAlert: "A pending or approved request already exists for this patient.",
+        requestAlertClass: "warning",
+        message: "A pending or approved request already exists for this patient."
+      });
+    }
+
+    const selectedPatient = selectedAppointment.user_id || null;
+    const submission = validation.value;
+
+    await BedRequest.create({
+      appointment_id: selectedAppointment._id,
+      patient_user_id: selectedPatient?._id || selectedAppointment.user_id,
+      patient_name: selectedAppointment.full_name,
+      patient_email: selectedAppointment.email,
+      patient_phone: selectedAppointment.phone,
+      doctor_id: context.doctorProfile._id,
+      doctor_name: context.doctorProfile.name || selectedAppointment.doctor_name || "Doctor",
+      bed_category: submission.bed_category,
+      urgency_level: submission.urgency_level,
+      department: submission.department || selectedAppointment.department || context.doctorProfile.department,
+      notes: submission.notes || selectedAppointment.symptoms || "",
+      status: "pending",
+      requested_by: req.user._id
     });
+
+    flashSuccess(req, "Bed request sent for admin approval.");
+    res.redirect(`/bed-requests?appointment_id=${selectedAppointment._id.toString()}`);
+  } catch (err) {
+    if (err?.name === "ValidationError" || err?.code === 11000) {
+      const context = await loadDoctorBedRequestContext({
+        userId: req.user._id,
+        appointmentId: rawSubmission.appointment_id
+      });
+      const selectedAppointment = context.acceptedAppointments.find((record) => String(record._id) === rawSubmission.appointment_id) || null;
+
+      return res.status(400).render("main/bedRequests", {
+        title: "Bed Requests",
+        ...context,
+        selectedAppointment,
+        formData: {
+          ...context.formData,
+          ...rawSubmission
+        },
+        requestAlert: "Please correct the highlighted bed request details.",
+        requestAlertClass: "danger",
+        message: getMongooseErrorMessage(err, "Please check the bed request details.")
+      });
+    }
+
+    next(err);
+  }
+});
+
+app.get("/bed-admissions", ensureRole("admin"), async (req, res, next) => {
+  try {
+    const bedCategory = normalizeBedCategory(req.query.bed_category, "icu");
+    const search = normalizeSearchTerm(req.query.search);
+
+    const [pendingRequestRecords, bedRecords] = await Promise.all([
+      BedRequest.find({
+        status: "pending",
+        bed_category: bedCategory
+      })
+        .sort({ createdAt: -1 })
+        .populate("appointment_id patient_user_id doctor_id requested_by resolved_by")
+        .lean(),
+      BedAdmission.find({ bed_category: bedCategory })
+        .sort({ createdAt: -1 })
+        .populate("patient_user_id recorded_by source_request_id approved_by")
+        .lean()
+    ]);
+
+    const pendingRequests = search
+      ? pendingRequestRecords.filter((record) => {
+        const appointment = record.appointment_id && record.appointment_id.full_name ? record.appointment_id : null;
+        const searchableText = buildSearchText(
+          appointment?.full_name,
+          appointment?.email,
+          appointment?.phone,
+          appointment?.appointment_date,
+          appointment?.time_slot,
+          record.patient_name,
+          record.patient_email,
+          record.patient_phone,
+          record.doctor_name,
+          record.department,
+          record.notes,
+          record.bed_category,
+          record.urgency_level,
+          appointment?.symptoms
+        );
+        return searchableText.includes(search);
+      })
+      : pendingRequestRecords;
+
+    const recentAdmissions = search
+      ? bedRecords.filter((record) => {
+        const patientName = record.patient_user_id ? getUserFullName(record.patient_user_id) : "";
+        const searchableText = buildSearchText(
+          patientName,
+          record.patient_name,
+          record.patient_email,
+          record.patient_phone,
+          record.bed_assigned,
+          record.department,
+          record.status,
+          record.source_request_id?.doctor_name || "",
+          record.notes || ""
+        );
+        return searchableText.includes(search);
+      })
+      : bedRecords;
+
+    const bedSummary = buildBedSummary(bedRecords);
 
     res.render("main/bedAdmissions", {
       title: "Bed Admissions",
-      patients,
-      selectedPatient,
-      formData,
+      bedCategory,
+      bedCategoryLabel: bedCategoryLabels[bedCategory] || "ICU",
+      search,
+      pendingRequests,
       recentAdmissions,
       bedSummary,
-      bedProjection,
-      bedAlert,
-      bedAlertClass,
+      pendingCount: pendingRequests.length,
+      matchingCount: recentAdmissions.length,
+      totalBeds: bedSummary ? bedSummary.totalBeds : 0,
       message: String(req.query.message || "")
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post("/bed-admissions/requests/:id/approve", ensureRole("admin"), async (req, res, next) => {
+  try {
+    const requestRecord = await BedRequest.findById(req.params.id)
+      .populate("appointment_id patient_user_id doctor_id requested_by resolved_by")
+      .lean();
+
+    if (!requestRecord) {
+      return redirectWithFlash(req, res, "/bed-admissions", "warning", "Bed request not found.");
+    }
+
+    if (String(requestRecord.status) !== "pending") {
+      return redirectWithFlash(req, res, "/bed-admissions", "warning", "That bed request has already been handled.");
+    }
+
+    const latestAdmission = await getLatestBedAdmissionSnapshot(requestRecord.bed_category);
+    const admissionPayload = buildAdmissionPayloadFromRequest(requestRecord, latestAdmission, req.user._id);
+
+    if (admissionPayload?.error) {
+      return redirectWithFlash(req, res, `/bed-admissions?bed_category=${normalizeBedCategory(requestRecord.bed_category)}&search=${encodeURIComponent(String(req.query.search || ""))}`, "warning", admissionPayload.error);
+    }
+
+    await BedAdmission.create(admissionPayload);
+    await BedRequest.findByIdAndUpdate(requestRecord._id, {
+      status: "approved",
+      resolved_by: req.user._id,
+      resolved_at: new Date()
+    });
+
+    flashSuccess(req, "Bed request approved and admission created.");
+    res.redirect(`/bed-admissions?bed_category=${normalizeBedCategory(requestRecord.bed_category)}&search=${encodeURIComponent(String(req.query.search || ""))}`);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post("/bed-admissions/requests/:id/reject", ensureRole("admin"), async (req, res, next) => {
+  try {
+    const requestRecord = await BedRequest.findById(req.params.id).lean();
+
+    if (!requestRecord) {
+      return redirectWithFlash(req, res, "/bed-admissions", "warning", "Bed request not found.");
+    }
+
+    if (String(requestRecord.status) !== "pending") {
+      return redirectWithFlash(req, res, "/bed-admissions", "warning", "That bed request has already been handled.");
+    }
+
+    await BedRequest.findByIdAndUpdate(requestRecord._id, {
+      status: "rejected",
+      resolved_by: req.user._id,
+      resolved_at: new Date()
+    });
+
+    flashSuccess(req, "Bed request rejected.");
+    res.redirect(`/bed-admissions?bed_category=${normalizeBedCategory(requestRecord.bed_category)}&search=${encodeURIComponent(String(req.query.search || ""))}`);
   } catch (err) {
     next(err);
   }
@@ -1472,51 +2213,15 @@ app.post("/bed-admissions", ensureRole("admin"), async (req, res, next) => {
 
 app.get("/staff-records", ensureRole("admin"), async (req, res, next) => {
   try {
-    const staffUserId = String(req.query.staff_user_id || "").trim();
-    const staffUsers = await User.find({ role: { $in: ["admin", "doctor"] } }).sort({ first_name: 1, last_name: 1 }).lean();
-    const selectedStaff = await findUserById(staffUserId);
-    const latestStaffRecord = selectedStaff
-      ? await StaffRecord.findOne({ staff_user_id: selectedStaff._id }).sort({ createdAt: -1 }).lean()
-      : await StaffRecord.findOne().sort({ createdAt: -1 }).lean();
-    const recentStaffRecords = await StaffRecord.find({})
-      .sort({ createdAt: -1 })
-      .limit(8)
-      .populate("staff_user_id recorded_by")
-      .lean();
-
-    const staffSummary = buildStaffSummary(recentStaffRecords);
-    const staffProjection = computeProjection(recentStaffRecords, "active_staff", 3);
-
-    let staffAlert = "";
-    let staffAlertClass = "info";
-    if (staffSummary) {
-      if (staffSummary.coveragePct < 85) {
-        staffAlert = "Staff coverage is below target. Consider shifting or adding staff soon.";
-        staffAlertClass = "danger";
-      } else if (staffSummary.coveragePct < 100) {
-        staffAlert = "Staff coverage is close to the required level.";
-        staffAlertClass = "warning";
-      } else {
-        staffAlert = "Staff coverage is within target.";
-        staffAlertClass = "success";
-      }
-    }
-
-    const formData = buildStaffRecordFormData({
-      selectedStaff,
-      latestRecord: latestStaffRecord
+    const context = await loadStaffRosterContext({
+      doctorId: String(req.query.doctor_id || "").trim(),
+      search: String(req.query.search || "")
     });
 
     res.render("main/staffRecords", {
       title: "Staff Records",
-      staffUsers,
-      selectedStaff,
-      formData,
-      recentStaffRecords,
-      staffSummary,
-      staffProjection,
-      staffAlert,
-      staffAlertClass,
+      ...context,
+      search: String(req.query.search || ""),
       message: String(req.query.message || "")
     });
   } catch (err) {
@@ -1526,110 +2231,145 @@ app.get("/staff-records", ensureRole("admin"), async (req, res, next) => {
 
 app.post("/staff-records", ensureRole("admin"), async (req, res, next) => {
   const rawSubmission = {
-    staff_user_id: String(req.body.staff_user_id || "").trim(),
-    staff_name: String(req.body.staff_name || "").trim(),
-    staff_email: String(req.body.staff_email || "").trim(),
-    staff_role: String(req.body.staff_role || "").trim(),
+    doctor_id: String(req.body.doctor_id || "").trim(),
+    active: String(req.body.active || "true").trim(),
     department: String(req.body.department || "").trim(),
-    shift: String(req.body.shift || "").trim(),
-    action_type: String(req.body.action_type || "").trim(),
-    status: String(req.body.status || "active").trim(),
-    total_staff: String(req.body.total_staff || "").trim(),
-    active_staff: String(req.body.active_staff || "").trim(),
-    added_staff: String(req.body.added_staff || "").trim(),
-    left_staff: String(req.body.left_staff || "").trim(),
-    required_staff: String(req.body.required_staff || "").trim(),
-    effective_date: String(req.body.effective_date || "").trim(),
-    recommendation: String(req.body.recommendation || "").trim(),
-    notes: String(req.body.notes || "").trim(),
-    recorded_by: String(req.user._id)
+    hospital_start_time: String(req.body.hospital_start_time || "").trim(),
+    hospital_end_time: String(req.body.hospital_end_time || "").trim(),
+    availability_days: Array.isArray(req.body.availability_days)
+      ? req.body.availability_days
+      : req.body.availability_days
+        ? [req.body.availability_days]
+        : [],
+    doctor_bio: String(req.body.doctor_bio || "").trim()
   };
 
   try {
-    const validation = staffRecordSchema.validate(rawSubmission, {
+    const validation = doctorRosterSchema.validate(rawSubmission, {
       abortEarly: true,
       stripUnknown: true
     });
 
-    const selectedStaff = await findUserById(rawSubmission.staff_user_id);
-    const staffUsers = await User.find({ role: { $in: ["admin", "doctor"] } }).sort({ first_name: 1, last_name: 1 }).lean();
-    const recentStaffRecords = await StaffRecord.find({})
-      .sort({ createdAt: -1 })
-      .limit(8)
-      .populate("staff_user_id recorded_by")
-      .lean();
-    const staffSummary = buildStaffSummary(recentStaffRecords);
-    const staffProjection = computeProjection(recentStaffRecords, "active_staff", 3);
+    const context = await loadStaffRosterContext({
+      doctorId: rawSubmission.doctor_id,
+      search: String(req.body.search || "")
+    });
+
+    const selectedDoctorRow = context.doctorRows.find((record) => String(record.doctor_id) === rawSubmission.doctor_id) || context.selectedDoctorRow || null;
 
     if (validation.error) {
       return res.status(400).render("main/staffRecords", {
         title: "Staff Records",
-        staffUsers,
-        selectedStaff,
-        formData: rawSubmission,
-        recentStaffRecords,
-        staffSummary,
-        staffProjection,
-        staffAlert: "Please correct the highlighted staff record details.",
+        ...context,
+        selectedDoctorRow,
+        search: String(req.body.search || ""),
+        formData: {
+          ...context.formData,
+          ...rawSubmission,
+          active: rawSubmission.active === "true" ? "true" : "false"
+        },
+        staffAlert: "Please correct the highlighted doctor roster details.",
         staffAlertClass: "danger",
-        message: getValidationMessage(validation.error, "Please check the staff record details.")
+        message: getValidationMessage(validation.error, "Please check the doctor roster details.")
       });
     }
 
-    if (!selectedStaff || selectedStaff.role === "user") {
+    if (!selectedDoctorRow) {
       return res.status(400).render("main/staffRecords", {
         title: "Staff Records",
-        staffUsers,
-        selectedStaff: null,
-        formData: rawSubmission,
-        recentStaffRecords,
-        staffSummary,
-        staffProjection,
-        staffAlert: "Please choose a valid staff account.",
+        ...context,
+        selectedDoctorRow: null,
+        search: String(req.body.search || ""),
+        formData: {
+          ...context.formData,
+          ...rawSubmission,
+          active: rawSubmission.active === "true" ? "true" : "false"
+        },
+        staffAlert: "Please choose a valid doctor account.",
         staffAlertClass: "danger",
-        message: "Please choose a valid staff account."
+        message: "Please choose a valid doctor account."
       });
     }
 
     const submission = validation.value;
+    const doctorProfile = await Doctor.findById(submission.doctor_id);
 
-    await StaffRecord.create({
-      staff_user_id: selectedStaff._id,
-      staff_name: submission.staff_name,
-      staff_email: submission.staff_email,
-      staff_role: submission.staff_role,
-      department: submission.department,
-      shift: submission.shift,
-      action_type: submission.action_type,
-      status: submission.status,
-      total_staff: submission.total_staff,
-      active_staff: submission.active_staff,
-      added_staff: submission.added_staff,
-      left_staff: submission.left_staff,
-      required_staff: submission.required_staff,
-      effective_date: submission.effective_date,
-      recommendation: submission.recommendation || undefined,
-      notes: submission.notes || undefined,
-      recorded_by: req.user._id
-    });
-
-    flashSuccess(req, "Staff record saved.");
-    res.redirect(`/staff-records?staff_user_id=${selectedStaff._id.toString()}`);
-  } catch (err) {
-    if (err?.name === "ValidationError" || err?.code === 11000) {
+    if (!doctorProfile) {
       return res.status(400).render("main/staffRecords", {
         title: "Staff Records",
-        staffUsers,
-        selectedStaff,
-        formData: rawSubmission,
-        recentStaffRecords,
-        staffSummary,
-        staffProjection,
-        staffAlert: "Please correct the highlighted staff record details.",
+        ...context,
+        selectedDoctorRow,
+        search: String(req.body.search || ""),
+        formData: {
+          ...context.formData,
+          ...rawSubmission,
+          active: rawSubmission.active === "true" ? "true" : "false"
+        },
+        staffAlert: "Doctor profile not found.",
         staffAlertClass: "danger",
-        message: getMongooseErrorMessage(err, "Please check the staff record details.")
+        message: "Doctor profile not found."
       });
     }
+
+    const generatedTimeSlots = buildTimeSlots(
+      submission.hospital_start_time,
+      submission.hospital_end_time,
+      doctorProfile.slot_duration_minutes || 30
+    );
+
+    if (!generatedTimeSlots.length) {
+      return res.status(400).render("main/staffRecords", {
+        title: "Staff Records",
+        ...context,
+        selectedDoctorRow,
+        search: String(req.body.search || ""),
+        formData: {
+          ...context.formData,
+          ...rawSubmission,
+          active: rawSubmission.active === "true" ? "true" : "false"
+        },
+        staffAlert: "Hospital end time must be after the start time.",
+        staffAlertClass: "danger",
+        message: "Hospital end time must be after the start time."
+      });
+    }
+
+    doctorProfile.active = submission.active;
+    doctorProfile.department = submission.department;
+    doctorProfile.hospital_start_time = submission.hospital_start_time;
+    doctorProfile.hospital_end_time = submission.hospital_end_time;
+    doctorProfile.availability_days = submission.availability_days;
+    doctorProfile.doctor_bio = submission.doctor_bio || doctorProfile.doctor_bio;
+    doctorProfile.time_slots = generatedTimeSlots;
+
+    await doctorProfile.save();
+
+    flashSuccess(req, `${doctorProfile.name || "Doctor"} roster updated.`);
+    res.redirect(`/staff-records?doctor_id=${doctorProfile._id.toString()}&search=${encodeURIComponent(String(req.body.search || ""))}`);
+  } catch (err) {
+    if (err?.name === "ValidationError" || err?.code === 11000) {
+      const context = await loadStaffRosterContext({
+        doctorId: rawSubmission.doctor_id,
+        search: String(req.body.search || "")
+      });
+      const selectedDoctorRow = context.doctorRows.find((record) => String(record.doctor_id) === rawSubmission.doctor_id) || context.selectedDoctorRow || null;
+
+      return res.status(400).render("main/staffRecords", {
+        title: "Staff Records",
+        ...context,
+        selectedDoctorRow,
+        search: String(req.body.search || ""),
+        formData: {
+          ...context.formData,
+          ...rawSubmission,
+          active: rawSubmission.active === "true" ? "true" : "false"
+        },
+        staffAlert: "Please correct the highlighted doctor roster details.",
+        staffAlertClass: "danger",
+        message: getMongooseErrorMessage(err, "Please check the doctor roster details.")
+      });
+    }
+
     next(err);
   }
 });
@@ -1638,13 +2378,24 @@ app.get("/dashboard", ensureRole("admin", "doctor"), async (req, res, next) => {
   try {
     if (req.user.role === "doctor") {
       const doctorProfile = await findDoctorByUserId(req.user._id);
-      const acceptedAppointments = doctorProfile
+      const approvedAppointments = doctorProfile
         ? await AppointmentDetail.find({ doctor_id: doctorProfile._id, status: "Accepted" })
           .sort({ createdAt: -1 })
           .limit(8)
           .populate("user_id doctor_id")
           .lean()
         : [];
+      const [appointmentNotifications, pendingAppointmentCount] = doctorProfile
+        ? await Promise.all([
+          AppointmentNotification.find({ recipient_role: "doctor", recipient_user_id: req.user._id })
+            .sort({ createdAt: -1 })
+            .limit(6)
+            .lean(),
+          AppointmentDetail.countDocuments({ doctor_id: doctorProfile._id, status: "Pending" })
+        ])
+        : [[], 0];
+      const pendingBedRequestsCount = await BedRequest.countDocuments({ requested_by: req.user._id, status: "pending" });
+      const weeklySchedule = buildWeeklyDoctorSchedule(doctorProfile);
 
       return res.render("main/doctorDashboard", {
         title: "Dashboard",
@@ -1655,25 +2406,27 @@ app.get("/dashboard", ensureRole("admin", "doctor"), async (req, res, next) => {
           roleLabel: roleLabels[req.user.role] || "Doctor"
         },
         doctorProfile,
-        acceptedAppointments,
-        acceptedCount: acceptedAppointments.length
+        acceptedAppointments: approvedAppointments,
+        acceptedCount: approvedAppointments.length,
+        pendingAppointmentCount,
+        appointmentNotifications,
+        weeklySchedule,
+        pendingBedRequestsCount
       });
     }
 
-    const [records, userCount, pendingCount, acceptedCount, rejectedCount, bedRecords, staffRecords] = await Promise.all([
+    const [records, userCount, pendingCount, acceptedCount, rejectedCount, bedRecords] = await Promise.all([
       AppointmentDetail.find({}).sort({ createdAt: -1 }).limit(8).populate("user_id doctor_id").lean(),
       User.countDocuments(),
       AppointmentDetail.countDocuments({ status: "Pending" }),
       AppointmentDetail.countDocuments({ status: "Accepted" }),
       AppointmentDetail.countDocuments({ status: "Rejected" }),
-      BedAdmission.find({}).sort({ createdAt: -1 }).limit(6).lean(),
-      StaffRecord.find({}).sort({ createdAt: -1 }).limit(6).lean()
+      BedAdmission.find({}).sort({ createdAt: -1 }).limit(6).lean()
     ]);
 
     const bedSummary = buildBedSummary(bedRecords);
-    const staffSummary = buildStaffSummary(staffRecords);
     const bedProjection = computeProjection(bedRecords, "occupied_beds", 3);
-    const staffProjection = computeProjection(staffRecords, "active_staff", 3);
+    const staffContext = await loadStaffRosterContext();
 
     res.render("main/adminDashboard", {
       title: "Dashboard",
@@ -1683,11 +2436,11 @@ app.get("/dashboard", ensureRole("admin", "doctor"), async (req, res, next) => {
       acceptedCount,
       rejectedCount,
       bedRecords,
-      staffRecords,
+      staffRecords: staffContext.rosterRows.slice(0, 6),
       bedSummary,
-      staffSummary,
+      staffSummary: staffContext.staffSummary,
       bedProjection,
-      staffProjection,
+      staffProjection: null,
       profile: {
         fullName: getUserFullName(req.user),
         email: req.user.email,
@@ -1756,12 +2509,12 @@ app.get("/reset", async (req, res, next) => {
       User.deleteMany({}),
       AppointmentDetail.deleteMany({}),
       BedAdmission.deleteMany({}),
-      StaffRecord.deleteMany({}),
+      BedRequest.deleteMany({}),
       Doctor.deleteMany({})
     ]);
     await seedDoctors();
     await migrateDoctorProfiles();
-    await seedStaffRecords({ force: true });
+    await seedBedAdmissions({ force: true });
     res.redirect("/");
   } catch (err) {
     next(err);
@@ -1782,7 +2535,7 @@ async function startServer() {
     await mongoose.connect(mongoUri);
     await seedDoctors();
     await migrateDoctorProfiles();
-    await seedStaffRecords();
+    await seedBedAdmissions();
     await migrateAppointmentReferences();
     console.log("Connected to MongoDB database cortex-connect.");
     app.listen(port, () => {

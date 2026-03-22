@@ -11,10 +11,16 @@ const appointmentDetailSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
+    appointment_code: {
+      type: String,
+      trim: true,
+      unique: true,
+      sparse: true
+    },
     patient_type: {
       type: String,
       enum: ["new", "existing"],
-      required: true
+      default: "existing"
     },
     full_name: {
       type: String,
@@ -33,7 +39,7 @@ const appointmentDetailSchema = new mongoose.Schema(
     gender: {
       type: String,
       enum: ["male", "female", "other", "prefer_not_to_say"],
-      required: true
+      default: "prefer_not_to_say"
     },
     email: {
       type: String,
@@ -81,11 +87,6 @@ const appointmentDetailSchema = new mongoose.Schema(
       required: true,
       trim: true
     },
-    department: {
-      type: String,
-      trim: true,
-      maxlength: 120
-    },
     previous_visit: {
       type: Boolean,
       default: false
@@ -94,11 +95,6 @@ const appointmentDetailSchema = new mongoose.Schema(
       type: String,
       enum: ["low", "medium", "high"],
       default: "low"
-    },
-    preferred_contact_method: {
-      type: String,
-      enum: ["phone", "email"],
-      required: true
     },
     consent: {
       type: Boolean,
@@ -112,6 +108,13 @@ const appointmentDetailSchema = new mongoose.Schema(
       type: String,
       enum: ["Pending", "Accepted", "Rejected"],
       default: "Pending"
+    },
+    approved_by: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User"
+    },
+    approved_at: {
+      type: Date
     }
   },
   {

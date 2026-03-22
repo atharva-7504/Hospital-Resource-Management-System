@@ -35,7 +35,7 @@
     <div class="col-md-3">
       <div class="card h-100">
         <div class="card-body">
-          <div class="text-muted small">Accepted</div>
+          <div class="text-muted small">Approved</div>
           <div class="h3 mb-0"><%= acceptedCount %></div>
         </div>
       </div>
@@ -142,7 +142,7 @@
         <div class="card-body p-4">
           <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
             <h2 class="h5 mb-0">Staff Coverage</h2>
-            <span class="badge text-bg-light border">3-day projection</span>
+            <span class="badge text-bg-light border">Live roster</span>
           </div>
 
           <% if (staffSummary) { %>
@@ -188,8 +188,8 @@
               </div>
               <div class="col-6 col-xl-3">
                 <div class="border rounded-3 p-3 h-100">
-                  <div class="text-muted small">Projected</div>
-                  <div class="h4 mb-0"><%= staffProjection ? staffProjection.projected : staffSummary.activeStaff %></div>
+                  <div class="text-muted small">Current</div>
+                  <div class="h4 mb-0"><%= staffSummary.activeStaff %></div>
                 </div>
               </div>
             </div>
@@ -243,7 +243,7 @@
       <div class="card h-100">
         <div class="card-body p-4">
           <div class="d-flex justify-content-between align-items-center gap-2 mb-3">
-            <h2 class="h5 mb-0">Recent Staff Records</h2>
+            <h2 class="h5 mb-0">Current Staff Roster</h2>
             <a href="/staff-records" class="btn btn-outline-primary btn-sm">Open</a>
           </div>
           <div class="table-responsive">
@@ -252,20 +252,22 @@
                 <tr>
                   <th>Staff</th>
                   <th>Role</th>
-                  <th>Coverage</th>
-                  <th>Date</th>
+                  <th>Department</th>
+                  <th>Status</th>
+                  <th>Updated</th>
                 </tr>
               </thead>
               <tbody>
                 <% if (!staffRecords || staffRecords.length === 0) { %>
-                  <tr><td colspan="4" class="text-center py-4 text-muted">No staff records yet.</td></tr>
+                  <tr><td colspan="5" class="text-center py-4 text-muted">No staff roster entries yet.</td></tr>
                 <% } else { %>
                   <% staffRecords.forEach((record) => { %>
                     <tr>
                       <td><%= record.staff_name %></td>
-                      <td><%= record.staff_role %></td>
-                      <td><%= record.active_staff %>/<%= record.required_staff %></td>
-                      <td><%= record.effective_date %></td>
+                      <td><%= record.role_label || record.staff_role %></td>
+                      <td><%= record.department %></td>
+                      <td><span class="badge text-bg-<%= record.active ? 'success' : 'secondary' %> text-uppercase"><%= record.status_label || (record.active ? 'Active' : 'Inactive') %></span></td>
+                      <td><%= record.latestDate ? new Date(record.latestDate).toLocaleString() : "-" %></td>
                     </tr>
                   <% }) %>
                 <% } %>
@@ -292,12 +294,13 @@
               <th>Date</th>
               <th>Time</th>
               <th>Status</th>
+              <th>Receipt</th>
             </tr>
           </thead>
           <tbody>
             <% if (!records || records.length === 0) { %>
               <tr>
-                <td colspan="5" class="text-center py-4 text-muted">No appointments yet.</td>
+                <td colspan="6" class="text-center py-4 text-muted">No appointments yet.</td>
               </tr>
             <% } else { %>
               <% records.forEach((record) => { %>
@@ -309,7 +312,8 @@
                   <td><%= record.doctor_name %></td>
                   <td><%= record.appointment_date %></td>
                   <td><%= record.time_slot %></td>
-                  <td><span class="badge text-bg-<%= record.status === 'Accepted' ? 'success' : record.status === 'Rejected' ? 'danger' : 'warning' %> text-uppercase"><%= record.status %></span></td>
+                  <td><span class="badge text-bg-<%= record.status === 'Accepted' ? 'success' : record.status === 'Rejected' ? 'danger' : 'warning' %> text-uppercase"><%= record.status === 'Accepted' ? 'Approved' : record.status %></span></td>
+                  <td><a href="/appointments/<%= record._id %>/receipt.pdf" class="btn btn-sm btn-outline-secondary">Download</a></td>
                 </tr>
               <% }) %>
             <% } %>

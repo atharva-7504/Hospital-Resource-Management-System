@@ -109,6 +109,17 @@ const bedAdmissionSchema = new mongoose.Schema(
       trim: true,
       maxlength: 1000
     },
+    source_request_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "BedRequest"
+    },
+    approved_by: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User"
+    },
+    approved_at: {
+      type: Date
+    },
     recorded_by: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
